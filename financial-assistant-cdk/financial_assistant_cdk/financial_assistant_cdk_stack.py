@@ -4,7 +4,9 @@ from aws_cdk import (
     aws_ec2 as ec2,
     aws_iam as iam,
     RemovalPolicy,
-    CfnOutput
+    CfnOutput,
+    aws_glue as glue,
+    aws_lambda as _lambda
 )
 from constructs import Construct
 
@@ -114,3 +116,46 @@ class FinancialAssistantCdkStack(Stack):
 
         # Output the Public IP so we can connect to it later
         CfnOutput(self, "ChromaPublicIP", value=instance.instance_public_ip)
+
+        # 7. Define the Glue Job
+        # We use a 'Python Shell' job for the MVP to keep it simple and cheap
+        ingestion_job = glue.CfnJob(self, "SEC-Ingestion-Job",
+            name="SEC-Ingestion-and-Embedding",
+            role=self.glue_role.role_arn,
+            command=glue.CfnJob.JobCommandProperty(
+                name="pythonshell",
+                python_version="3.9",
+                script_location=f"s3://{self.bucket.bucket_name}/scripts/glue_ingestion.py"
+            ),
+            default_arguments={
+                "--CHROMA_IP": instance.instance_public_ip,
+                "--BUCKET_NAME": self.bucket.bucket_name,
+                "--additional-python-modules": "chromadb,boto3,beautifulsoup4"
+            },
+            max_capacity=0.0625 # This is the smallest/cheapest unit for Python Shell
+        )
+
+        # # 8. Define the Query Lambda
+        # query_lambda = _lambda.Function(self, "QueryHandler",
+        #     runtime=_lambda.Runtime.PYTHON_3_11,
+        #     handler="query_lambda.handler",
+        #     code=_lambda.Code.from_asset("lambda"), # This points to a 'lambda' folder in your project
+        #     timeout=Duration.seconds(30),
+        #     environment={
+        #         "CHROMA_IP": instance.instance_public_ip,
+        #         "COLLECTION_NAME": "aapl_financials"
+        #     }
+        # )
+
+        # # Grant Lambda permission to talk to Bedrock
+        # query_lambda.add_to_role_policy(iam.PolicyStatement(
+        #     actions=["bedrock:InvokeModel"],
+        #     resources=["*"]
+        # ))
+
+        # # Create a Public URL for testing
+        # fn_url = query_lambda.add_function_url(
+        #     auth_type=_lambda.FunctionUrlAuthType.NONE # TODO: For MVP only!
+        # )
+
+        # CfnOutput(self, "QueryUrl", value=fn_url.url)
