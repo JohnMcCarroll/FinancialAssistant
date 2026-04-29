@@ -6,7 +6,8 @@ from aws_cdk import (
     RemovalPolicy,
     CfnOutput,
     aws_glue as glue,
-    aws_lambda as _lambda
+    aws_lambda as _lambda,
+    Duration,
 )
 from constructs import Construct
 
@@ -43,6 +44,11 @@ class FinancialAssistantCdkStack(Stack):
             actions=["bedrock:InvokeModel"],
             resources=["*"] #TODO: specific model scope
         ))
+
+        # This gives Glue the base permissions to write logs and talk to the network
+        self.glue_role.add_managed_policy(
+            iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSGlueServiceRole")
+        )
 
         # Output the Bucket Name to your terminal after deployment
         self.export_value(self.bucket.bucket_name, name="DataLakeName")
@@ -130,32 +136,32 @@ class FinancialAssistantCdkStack(Stack):
             default_arguments={
                 "--CHROMA_IP": instance.instance_public_ip,
                 "--BUCKET_NAME": self.bucket.bucket_name,
-                "--additional-python-modules": "chromadb,boto3,beautifulsoup4"
+                "--additional-python-modules": "chromadb-client,boto3>=1.34.0,botocore>=1.34.0,beautifulsoup4"
             },
             max_capacity=0.0625 # This is the smallest/cheapest unit for Python Shell
         )
 
-        # # 8. Define the Query Lambda
-        # query_lambda = _lambda.Function(self, "QueryHandler",
-        #     runtime=_lambda.Runtime.PYTHON_3_11,
-        #     handler="query_lambda.handler",
-        #     code=_lambda.Code.from_asset("lambda"), # This points to a 'lambda' folder in your project
-        #     timeout=Duration.seconds(30),
-        #     environment={
-        #         "CHROMA_IP": instance.instance_public_ip,
-        #         "COLLECTION_NAME": "aapl_financials"
-        #     }
-        # )
+        # 8. Define the Query Lambda
+        query_lambda = _lambda.Function(self, "QueryHandler",
+            runtime=_lambda.Runtime.PYTHON_3_11,
+            handler="query_lambda.handler",
+            code=_lambda.Code.from_asset("lambda"), # This points to a 'lambda' folder in your project
+            timeout=Duration.seconds(30),
+            environment={
+                "CHROMA_IP": instance.instance_public_ip,
+                "COLLECTION_NAME": "aapl_financials"
+            }
+        )
 
-        # # Grant Lambda permission to talk to Bedrock
-        # query_lambda.add_to_role_policy(iam.PolicyStatement(
-        #     actions=["bedrock:InvokeModel"],
-        #     resources=["*"]
-        # ))
+        # Grant Lambda permission to talk to Bedrock
+        query_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["bedrock:InvokeModel"],
+            resources=["*"]
+        ))
 
-        # # Create a Public URL for testing
-        # fn_url = query_lambda.add_function_url(
-        #     auth_type=_lambda.FunctionUrlAuthType.NONE # TODO: For MVP only!
-        # )
+        # Create a Public URL for testing
+        fn_url = query_lambda.add_function_url(
+            auth_type=_lambda.FunctionUrlAuthType.NONE # TODO: For MVP only!
+        )
 
-        # CfnOutput(self, "QueryUrl", value=fn_url.url)
+        CfnOutput(self, "QueryUrl", value=fn_url.url)

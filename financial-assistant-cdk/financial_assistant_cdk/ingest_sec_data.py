@@ -4,7 +4,7 @@ import os
 
 # 1. Configuration
 # Replace this with the bucket name from your CDK output!
-BUCKET_NAME = "financialassistantcdkstac-financialdatalake00af577-dpkmibyaz3jf" 
+BUCKET_NAME = "financialassistantcdkstac-financialdatalake00af577-knj1nezirfcr" 
 TICKER = "AAPL"
 EMAIL = "jtm5356@rit.edu" # SEC requires an email for their API
 

@@ -2,12 +2,18 @@ import json
 import os
 import boto3
 import urllib3
+import logging
+
+# TODO: Setup Logger
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
 http = urllib3.PoolManager()
 
 CHROMA_IP = os.environ['CHROMA_IP']
-CHROMA_URL = f"http://{CHROMA_IP}:8000/api/v1"
+COLLECTION_ID = "86f0d667-1fb2-445e-aa03-8159a497599c" # TODO: remove hardcoding
+CHROMA_URL = f"http://{CHROMA_IP}:8000/api/v2/tenants/default/databases/default"
 
 def get_embedding(text):
     body = json.dumps({"inputText": text})
@@ -27,23 +33,36 @@ def handler(event, context):
     query_vector = get_embedding(user_query)
 
     # 3. Query ChromaDB (via API)
-    # We're looking for the top 3 relevant paragraphs
+    # We're looking for the top 5 relevant paragraphs
     search_payload = {
         "query_embeddings": [query_vector],
-        "n_results": 3
+        "n_results": 5
     }
     
     # Note: In a real app, you'd use the chromadb-client library
     # Here we hit the raw endpoint for simplicity
     res = http.request(
         'POST', 
-        f"{CHROMA_URL}/collections/YOUR_COLLECTION_ID/query", # You'll need the ID from the Glue job output
-        body=json.dumps(search_payload)
+        f"{CHROMA_URL}/collections/{COLLECTION_ID}/query", 
+        body=json.dumps(search_payload),
+        headers={'Content-Type': 'application/json'}
     )
+
+    # DEBUG: If it's not a 200 OK, return the raw text to the browser so we can see the error
+    if res.status != 200:
+        return {
+            "statusCode": res.status,
+            "body": json.dumps({
+                "error": "ChromaDB returned an error",
+                "status_code": res.status,
+                "raw_response": res.data.decode('utf-8')
+            })
+        }
+
     results = json.loads(res.data)
     
     # 4. Construct the Prompt for Claude
-    context_text = "\n".join(results['documents'][0])
+    context_text = "\n\n".join(results['documents'][0])
     prompt = f"""
     Human: Use the following excerpts from Apple's 10-K to answer the question.
     Context: {context_text}
@@ -53,12 +72,12 @@ def handler(event, context):
     Assistant: Based on the 10-K filing,
     """
 
-    # 5. Call Claude 3.5 Sonnet
+    # 5. Call Claude 3.7 Sonnet
     llm_response = bedrock.invoke_model(
-        modelId="anthropic.claude-3-sonnet-20240229-v1:0",
+        modelId="us.anthropic.claude-sonnet-4-6",
         body=json.dumps({
             "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 500,
+            "max_tokens": 2000,
             "messages": [{"role": "user", "content": prompt}]
         })
     )
@@ -67,6 +86,10 @@ def handler(event, context):
 
     return {
         "statusCode": 200,
-        "body": json.dumps({"answer": answer})
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps({
+            "answer": answer,
+            "source_chunks_found": len(results['documents'][0])
+        })
     }
 
