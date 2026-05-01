@@ -11,6 +11,7 @@ from aws_cdk import (
 )
 from constructs import Construct
 
+
 class FinancialAssistantCdkStack(Stack):
 
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
@@ -165,3 +166,4 @@ class FinancialAssistantCdkStack(Stack):
         )
 
         CfnOutput(self, "QueryUrl", value=fn_url.url)
+
