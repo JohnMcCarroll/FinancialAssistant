@@ -3,13 +3,22 @@ Write-Host "--- Deploying CDK Stack ---" -ForegroundColor Cyan
 cdk deploy --require-approval never
 
 # 2. Extract the Glue Job Name from CDK (Assuming you named the output)
-$jobName = "SEC-Ingestion-and-Embedding" # Or use: aws cloudformation describe-stacks ...
+
 
 # 3. Wait for the EC2 instance to finish its setup (UserData)
 # 2. The "Smart Ping" - Wait for ChromaDB to be alive
 $outputs = aws cloudformation describe-stacks --stack-name FinancialAssistantCdkStack --query "Stacks[0].Outputs" | ConvertFrom-Json
 $ip = ($outputs | Where-Object { $_.OutputKey -eq "ChromaPublicIP" }).OutputValue
 $queryUrl = ($outputs | Where-Object { $_.OutputKey -eq "QueryUrl" }).OutputValue
+$jobName = ($outputs | Where-Object { $_.OutputKey -eq "GlueJobName" }).OutputValue
+$bucketName = ($outputs | Where-Object { $_.OutputKey -eq "ExportDataLakeName" }).OutputValue
+$ticker = "AAPL"
+
+# 3223323. Run local SEC data ingestion
+Write-Host "--- Running Local SEC Harvester ($ticker) ---" -ForegroundColor Yellow
+python financial_assistant_cdk\ingest_sec_data.py --bucket_name $bucketName --ticker $ticker
+
+
 Write-Host "--- Waiting for ChromaDB Heartbeat ---" -ForegroundColor Yellow
 $heartbeatUrl = "http://$($ip):8000/api/v2/heartbeat"
 $ready = $false
@@ -28,9 +37,6 @@ while (-not $ready -and $attempts -lt 30) {
         Start-Sleep -Seconds 10
     }
 }
-
-# 3.5? Get the bucket name from the stack outputs
-$bucketName = ($outputs | Where-Object { $_.OutputKey -eq "ExportDataLakeName" }).OutputValue
 
 Write-Host "--- Uploading Glue Script to S3 ---" -ForegroundColor Yellow
 aws s3 cp ./financial_assistant_cdk/glue_ingestion.py "s3://$($bucketName)/scripts/glue_ingestion.py"

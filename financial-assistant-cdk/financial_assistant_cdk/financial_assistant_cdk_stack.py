@@ -175,4 +175,5 @@ class FinancialAssistantCdkStack(Stack):
         )
 
         CfnOutput(self, "QueryUrl", value=fn_url.url)
+        CfnOutput(self, "GlueJobName", value=self.ingestion_job.name)
 
