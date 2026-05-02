@@ -21,6 +21,11 @@ def get_collection_id():
     try:
         res = http.request('GET', f"{CHROMA_URL}/collections")
         collections = json.loads(res.data)
+
+        # LOGGING
+        found_names = [c['name'] for c in collections]
+        logger.info(f"Collections currently in DB: {found_names}")
+
         for col in collections:
             if col['name'] == COLLECTION_NAME:
                 return col['id']

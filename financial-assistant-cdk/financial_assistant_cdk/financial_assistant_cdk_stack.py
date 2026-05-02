@@ -8,6 +8,7 @@ from aws_cdk import (
     aws_glue as glue,
     aws_lambda as _lambda,
     Duration,
+    aws_s3_deployment as s3_deploy,
 )
 from constructs import Construct
 
@@ -33,6 +34,13 @@ class FinancialAssistantCdkStack(Stack):
             removal_policy=RemovalPolicy.DESTROY,
             auto_delete_objects=True
         )
+
+        # # uploads your local 'scripts' folder to the S3 bucket
+        # s3_deploy.BucketDeployment(self, "DeployGlueScripts",
+        #     sources=[s3_deploy.Source.asset("./scripts")], # Points to your local directory
+        #     destination_bucket=self.bucket,
+        #     destination_key_prefix="scripts" # Places it in the 'scripts/' folder in S3
+        # )
 
         # 3. Create a Role for AWS Glue
         self.glue_role = iam.Role(self, "GlueIngestionRole",
@@ -126,7 +134,7 @@ class FinancialAssistantCdkStack(Stack):
 
         # 7. Define the Glue Job
         # We use a 'Python Shell' job for the MVP to keep it simple and cheap
-        ingestion_job = glue.CfnJob(self, "SEC-Ingestion-Job",
+        self.ingestion_job = glue.CfnJob(self, "SEC-Ingestion-Job",
             name="SEC-Ingestion-and-Embedding",
             role=self.glue_role.role_arn,
             command=glue.CfnJob.JobCommandProperty(
@@ -137,13 +145,14 @@ class FinancialAssistantCdkStack(Stack):
             default_arguments={
                 "--CHROMA_IP": instance.instance_public_ip,
                 "--BUCKET_NAME": self.bucket.bucket_name,
-                "--additional-python-modules": "chromadb-client,boto3>=1.34.0,botocore>=1.34.0,beautifulsoup4"
+                "--ticker": "AAPL", # This sets the default ticker
+                "--additional-python-modules": "sec-edgar-downloader==5.0.2,chromadb-client,boto3>=1.34.0,botocore>=1.34.0,beautifulsoup4,requests"
             },
             max_capacity=0.0625 # This is the smallest/cheapest unit for Python Shell
         )
 
         # 8. Define the Query Lambda
-        query_lambda = _lambda.Function(self, "QueryHandler",
+        self.query_lambda = _lambda.Function(self, "QueryHandler",
             runtime=_lambda.Runtime.PYTHON_3_11,
             handler="query_lambda.handler",
             code=_lambda.Code.from_asset("lambda"), # This points to a 'lambda' folder in your project
@@ -155,13 +164,13 @@ class FinancialAssistantCdkStack(Stack):
         )
 
         # Grant Lambda permission to talk to Bedrock
-        query_lambda.add_to_role_policy(iam.PolicyStatement(
+        self.query_lambda.add_to_role_policy(iam.PolicyStatement(
             actions=["bedrock:InvokeModel"],
             resources=["*"]
         ))
 
         # Create a Public URL for testing
-        fn_url = query_lambda.add_function_url(
+        fn_url = self.query_lambda.add_function_url(
             auth_type=_lambda.FunctionUrlAuthType.NONE # TODO: For MVP only!
         )
 

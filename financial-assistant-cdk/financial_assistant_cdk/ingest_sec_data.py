@@ -1,6 +1,20 @@
 import boto3
 from sec_edgar_downloader import Downloader
 import os
+# import sys
+# from awsglue.utils import getResolvedOptions
+
+# # Add 'bucket_name' and 'ticker' to the list of expected arguments
+# args = getResolvedOptions(sys.argv, [
+#     'chroma_ip', 
+#     'bucket_name', 
+#     'ticker'
+# ])
+
+# # Now these are dynamic!
+# BUCKET_NAME = args['bucket_name']
+# TICKER = args['ticker']
+# CHROMA_IP = args['chroma_ip']
 
 # 1. Configuration
 # Replace this with the bucket name from your CDK output!
