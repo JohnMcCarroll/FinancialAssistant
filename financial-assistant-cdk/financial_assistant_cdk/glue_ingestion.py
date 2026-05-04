@@ -26,7 +26,9 @@ bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
 chroma_client = chromadb.HttpClient(
     host=CHROMA_IP, 
     port=8000,
-    settings=Settings(allow_reset=True)
+    # tenant="default",
+    # database="default",
+    # settings=Settings(allow_reset=True)
 )
 collection = chroma_client.get_or_create_collection(name="aapl_financials")
 
@@ -85,17 +87,61 @@ final_chunks = chunk_text(clean_text)
 print(f"Original text length: {len(clean_text)}")
 print(f"Created {len(final_chunks)} chunks.")
 
+# for i, chunk in enumerate(final_chunks):
+#     try:
+#         vector = get_embedding(chunk)
+#         collection.add(
+#             ids=[f"chunk_{i}"],
+#             embeddings=[vector],
+#             metadatas=[{"source": "AAPL_10K_2023"}], 
+#             documents=[chunk]
+#         )
+#     except Exception as e:
+#         print(f"Failed on chunk {i}: {str(e)}")
+#         continue # Don't let one bad chunk kill the whole job
+
+# print(f"Successfully indexed {len(final_chunks)} chunks into ChromaDB.")
+
+# --- Update the Indexing Loop (Batching) ---
+all_ids = []
+all_embeddings = []
+all_metadatas = []
+all_documents = []
+
 for i, chunk in enumerate(final_chunks):
     try:
         vector = get_embedding(chunk)
-        collection.add(
-            ids=[f"chunk_{i}"],
-            embeddings=[vector],
-            metadatas=[{"source": "AAPL_10K_2023"}], 
-            documents=[chunk]
-        )
+        all_ids.append(f"chunk_{i}")
+        all_embeddings.append(vector)
+        all_metadatas.append({"source": "AAPL_10K_2023"})
+        all_documents.append(chunk)
+        
+        # Every 100 chunks, push to the server
+        if len(all_ids) >= 100:
+            collection.add(
+                ids=all_ids,
+                embeddings=all_embeddings,
+                metadatas=all_metadatas,
+                documents=all_documents
+            )
+            print(f"Pushed batch up to chunk {i}")
+            # Clear batches
+            all_ids, all_embeddings, all_metadatas, all_documents = [], [], [], []
+            
     except Exception as e:
-        print(f"Failed on chunk {i}: {str(e)}")
-        continue # Don't let one bad chunk kill the whole job
+        print(f"Error preparing chunk {i}: {str(e)}")
 
-print(f"Successfully indexed {len(final_chunks)} chunks into ChromaDB.")
+# Push any remaining chunks
+if all_ids:
+    collection.add(ids=all_ids, embeddings=all_embeddings, metadatas=all_metadatas, documents=all_documents)
+
+# --- THE TRUTH TEST ---
+print(f"VERIFICATION: Connection Host: {CHROMA_IP}")
+print(f"VERIFICATION: Final count in collection: {collection.count()}")
+print(f"VERIFICATION: Remote collections: {chroma_client.list_collections()}")
+
+# This will tell us the EXACT tenant/db names the client used
+try:
+    print(f"VERIFICATION: Client Settings: {chroma_client._settings}")
+except:
+    pass

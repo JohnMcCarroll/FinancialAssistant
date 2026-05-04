@@ -14,7 +14,9 @@ http = urllib3.PoolManager()
 CHROMA_IP = os.environ.get('CHROMA_IP')
 # COLLECTION_ID = "86f0d667-1fb2-445e-aa03-8159a497599c" # TODO: remove hardcoding
 COLLECTION_NAME = os.environ.get('COLLECTION_NAME', 'aapl_financials')
-CHROMA_URL = f"http://{CHROMA_IP}:8000/api/v2/tenants/default/databases/default"
+# CHROMA_URL = f"http://{CHROMA_IP}:8000/api/v2/tenants/default/databases/default"
+CHROMA_URL = f"http://{CHROMA_IP}:8000/api/v2/tenants/default_tenant/databases/default_database"
+
 
 def get_collection_id():
     """Dynamically fetches the UUID for our collection name."""
@@ -40,7 +42,7 @@ def get_embedding(text):
     body = json.dumps({"inputText": text})
     response = bedrock.invoke_model(
         body=body, 
-        modelId="amazon.titan-embed-text-v1"
+        modelId="amazon.titan-embed-text-v2:0"
     )
     return json.loads(response['body'].read())['embedding']
 
