@@ -146,9 +146,10 @@ class FinancialAssistantCdkStack(Stack):
                 "--CHROMA_IP": instance.instance_public_ip,
                 "--BUCKET_NAME": self.bucket.bucket_name,
                 "--ticker": "AAPL", # This sets the default ticker
-                "--additional-python-modules": "sec-edgar-downloader==5.0.2,chromadb-client,boto3>=1.34.0,botocore>=1.34.0,beautifulsoup4,requests"
+                "--additional-python-modules": "sec-edgar-downloader==5.0.2,chromadb-client,boto3>=1.34.0,botocore>=1.34.0,beautifulsoup4,requests,numpy<2.0.0,langchain-text-splitters"
             },
-            max_capacity=0.0625 # This is the smallest/cheapest unit for Python Shell
+            max_capacity=0.0625, # This is the smallest/cheapest unit for Python Shell
+            glue_version="3.0",
         )
 
         # 8. Define the Query Lambda

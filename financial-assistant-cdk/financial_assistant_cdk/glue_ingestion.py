@@ -5,11 +5,12 @@ from chromadb.config import Settings
 from bs4 import BeautifulSoup
 from awsglue.utils import getResolvedOptions
 import json
-
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 # Validation
 import botocore
 print(f"Boto3 version: {boto3.__version__}")
 print(f"Botocore version: {botocore.__version__}")
+
 
 # Get arguments passed from CDK
 args = getResolvedOptions(sys.argv, ['CHROMA_IP', 'BUCKET_NAME'])
@@ -31,7 +32,7 @@ def get_embedding(text):
     body = json.dumps({"inputText": text})
     response = bedrock.invoke_model(
         body=body, 
-        modelId="amazon.titan-embed-text-v1"
+        modelId="amazon.titan-embed-text-v2:0"
     )
     
     # 1. Read the StreamingBody to get raw bytes
@@ -43,20 +44,28 @@ def get_embedding(text):
     # 3. Extract the vector
     return response_json['embedding']
 
-def chunk_text(text, max_chars=20000, overlap=2000):
+def chunk_text(text, max_chars=3000, overlap=300):
     """
     Splits text into manageable chunks. 
     If a chunk is too big, it splits by sentences, then by characters.
     """
-    chunks = []
-    start = 0
-    while start < len(text):
-        # Determine the end of the chunk
-        end = start + max_chars
-        chunk = text[start:end]
-        chunks.append(chunk)
-        # Move start point back by overlap to keep context between chunks
-        start += (max_chars - overlap)
+    # chunks = []
+    # start = 0
+    # while start < len(text):
+    #     # Determine the end of the chunk
+    #     end = start + max_chars
+    #     chunk = text[start:end]
+    #     chunks.append(chunk)
+    #     # Move start point back by overlap to keep context between chunks
+    #     start += (max_chars - overlap)
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=max_chars, 
+        chunk_overlap=overlap,
+        separators=["\n\n", "\n", ".", " ", ""]
+    )
+    chunks = text_splitter.split_text(text)
+
     return chunks
 
 # --- Main Execution ---
