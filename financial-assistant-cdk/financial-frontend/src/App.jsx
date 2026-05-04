@@ -24,7 +24,10 @@ function App() {
 
     try {
       // Replace with your actual Lambda Function URL or API Gateway endpoint
-      const response = await fetch(`YOUR_LAMBDA_URL?q=${encodeURIComponent(input)}`);
+      const baseUrl = import.meta.env.VITE_QUERY_URL;
+      const response = await fetch(`${baseUrl}?q=${encodeURIComponent(input)}`);
+
+      // const response = await fetch(`YOUR_LAMBDA_URL?q=${encodeURIComponent(input)}`);
       const data = await response.json();
       
       setMessages(prev => [...prev, { role: 'assistant', content: data.answer }]);

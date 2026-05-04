@@ -172,7 +172,11 @@ class FinancialAssistantCdkStack(Stack):
 
         # Create a Public URL for testing
         fn_url = self.query_lambda.add_function_url(
-            auth_type=_lambda.FunctionUrlAuthType.NONE # TODO: For MVP only!
+            auth_type=_lambda.FunctionUrlAuthType.NONE, # TODO: For MVP only!
+            cors={
+                "allowed_origins": ['*'],
+                "allowed_methods": [_lambda.HttpMethod.GET, _lambda.HttpMethod.POST]
+            }
         )
 
         CfnOutput(self, "QueryUrl", value=fn_url.url)

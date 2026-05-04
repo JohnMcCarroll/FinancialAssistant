@@ -120,7 +120,11 @@ def handler(event, context):
 
         return {
             "statusCode": 200,
-            "headers": {"Content-Type": "application/json"},
+            "headers": {
+                "Content-Type": "application/json", 
+                "Access-Control-Allow-Origin": "*", # Allow the browser to read the response
+                "Access-Control-Allow-Methods": "GET,POST,OPTIONS"
+            },
             "body": json.dumps({
                 "answer": answer,
                 "source_chunks_found": len(results['documents'][0])

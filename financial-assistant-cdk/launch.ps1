@@ -2,6 +2,8 @@
 Write-Host "--- Deploying CDK Stack ---" -ForegroundColor Cyan
 cdk deploy --require-approval never
 
+# --outputs-file ./outputs.json
+
 # 2. Extract the Glue Job Name from CDK (Assuming you named the output)
 
 
@@ -63,4 +65,23 @@ while ($status -eq "STARTING" -or $status -eq "RUNNING") {
     }
 }
 
-Write-Host "Follow this link to chat with your AI financial advisor: $queryUrl."
+#Write-Host "Follow this link to chat with your AI financial advisor: $queryUrl."
+
+# Load the outputs from the JSON file
+#$outputs = Get-Content ./outputs.json | ConvertFrom-Json
+
+# Identify the Stack Name (usually the class name in your app.py)
+# If your stack is named 'FinancialAssistantStack', it will be the key in the JSON
+$stackName = 'FinancialAssistantCDKStack' #$outputs.psobject.Properties.Name[0]
+#$lambdaUrl = $outputs.$stackName.QueryLambdaUrl
+
+# Path to the frontend .env file
+$envFilePath = "./financial-frontend/.env.local"
+
+# Write the URL to the .env file
+"VITE_QUERY_URL=$QueryUrl" | Out-File -FilePath $envFilePath -Encoding utf8
+
+Write-Host "Successfully injected Lambda URL into Frontend: $lambdaUrl" -ForegroundColor Green
+
+cd .\financial-frontend
+npm run dev
