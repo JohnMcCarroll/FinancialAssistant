@@ -179,6 +179,13 @@ class FinancialAssistantCdkStack(Stack):
             }
         )
 
+        # 1. Standard Bedrock Invoke Permission
+        self.query_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["bedrock:InvokeModel"],
+            resources=["*"] # Or narrow this down to the Claude 4.6 ARN
+        ))
+
+
         CfnOutput(self, "QueryUrl", value=fn_url.url)
         CfnOutput(self, "GlueJobName", value=self.ingestion_job.name)
 

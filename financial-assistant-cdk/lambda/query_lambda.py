@@ -106,17 +106,44 @@ def handler(event, context):
 
         logger.info(f"FINAL RAG PROMPT SENT TO CLAUDE:\n{prompt}")
 
-        # 5. Call Claude 4.6 Sonnet
+        # # 5. Call Claude 4.6 Sonnet
+        # llm_response = bedrock.invoke_model(
+        #     modelId="us.anthropic.claude-sonnet-4-6",
+        #     body=json.dumps({
+        #         "anthropic_version": "bedrock-2023-05-31",
+        #         "max_tokens": 2000,
+        #         "messages": [{"role": "user", "content": prompt}]
+        #     })
+        # )
+
+        model_id = "us.amazon.nova-lite-v1:0"
+
+        # Amazon Nova expects a "messages" format
+        native_request = {
+            "inferenceConfig": {
+                "maxTokens": 1000,
+                "temperature": 0.7,
+                "topP": 0.9,
+            },
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"text": prompt} # 'prompt' is your combined context + question
+                    ]
+                }
+            ]
+        }
+
         llm_response = bedrock.invoke_model(
-            modelId="us.anthropic.claude-sonnet-4-6",
-            body=json.dumps({
-                "anthropic_version": "bedrock-2023-05-31",
-                "max_tokens": 2000,
-                "messages": [{"role": "user", "content": prompt}]
-            })
+            modelId=model_id,
+            body=json.dumps(native_request)
         )
+
+        model_response = json.loads(llm_response["body"].read())
+        print(model_response)
         
-        answer = json.loads(llm_response['body'].read())['content'][0]['text']
+        answer = model_response['content'][0]['text']
 
         return {
             "statusCode": 200,
