@@ -13,9 +13,12 @@ print(f"Botocore version: {botocore.__version__}")
 
 
 # Get arguments passed from CDK
-args = getResolvedOptions(sys.argv, ['CHROMA_IP', 'BUCKET_NAME'])
+args = getResolvedOptions(sys.argv, ['CHROMA_IP', 'BUCKET_NAME', 'ticker'])
 CHROMA_IP = args['CHROMA_IP']
 BUCKET_NAME = args['BUCKET_NAME']
+
+print(f"Connecting to ChromaDB at: {CHROMA_IP}")
+print(f"Reading data from: {BUCKET_NAME}")
 
 # Initialize Clients
 s3 = boto3.client('s3')

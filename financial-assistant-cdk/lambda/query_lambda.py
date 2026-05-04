@@ -11,9 +11,9 @@ logger.setLevel(logging.INFO)
 bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
 http = urllib3.PoolManager()
 
-CHROMA_IP = os.environ['CHROMA_IP']
+CHROMA_IP = os.environ.get('CHROMA_IP')
 # COLLECTION_ID = "86f0d667-1fb2-445e-aa03-8159a497599c" # TODO: remove hardcoding
-COLLECTION_NAME = "aapl_financials"
+COLLECTION_NAME = os.environ.get('COLLECTION_NAME', 'aapl_financials')
 CHROMA_URL = f"http://{CHROMA_IP}:8000/api/v2/tenants/default/databases/default"
 
 def get_collection_id():
@@ -29,6 +29,7 @@ def get_collection_id():
         for col in collections:
             if col['name'] == COLLECTION_NAME:
                 return col['id']
+
         raise Exception(f"Collection '{COLLECTION_NAME}' not found. Did the Glue job run?")
     except urllib3.exceptions.NewConnectionError:
         raise Exception(f"CRITICAL: Could not connect to ChromaDB at {CHROMA_IP}. Is the server running and Port 8000 open?")
