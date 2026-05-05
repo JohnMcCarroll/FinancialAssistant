@@ -16,9 +16,9 @@ $jobName = ($outputs | Where-Object { $_.OutputKey -eq "GlueJobName" }).OutputVa
 $bucketName = ($outputs | Where-Object { $_.OutputKey -eq "ExportDataLakeName" }).OutputValue
 $ticker = "AAPL"
 
-# 3223323. Run local SEC data ingestion
-Write-Host "--- Running Local SEC Harvester ($ticker) ---" -ForegroundColor Yellow
-python financial_assistant_cdk\ingest_sec_data.py --bucket_name $bucketName --ticker $ticker
+# # 3223323. Run local SEC data ingestion
+# Write-Host "--- Running Local SEC Harvester ($ticker) ---" -ForegroundColor Yellow
+# python financial_assistant_cdk\ingest_sec_data.py --bucket_name $bucketName --ticker $ticker
 
 
 Write-Host "--- Waiting for ChromaDB Heartbeat ---" -ForegroundColor Yellow
@@ -40,41 +40,40 @@ while (-not $ready -and $attempts -lt 30) {
     }
 }
 
-Write-Host "--- Uploading Glue Script to S3 ---" -ForegroundColor Yellow
-aws s3 cp ./financial_assistant_cdk/glue_ingestion.py "s3://$($bucketName)/scripts/glue_ingestion.py"
+# Write-Host "--- Uploading Glue Script to S3 ---" -ForegroundColor Yellow
+# aws s3 cp ./financial_assistant_cdk/glue_ingestion.py "s3://$($bucketName)/scripts/glue_ingestion.py"
 
-# 4. Start the Glue Job
-Write-Host "--- Starting Data Ingestion (Glue Job) ---" -ForegroundColor Cyan
-$runId = aws glue start-job-run --job-name $jobName --query "JobRunId" --output text
+# # 4. Start the Glue Job
+# Write-Host "--- Starting Data Ingestion (Glue Job) ---" -ForegroundColor Cyan
+# $runId = aws glue start-job-run --job-name $jobName --query "JobRunId" --output text
 
-Write-Host "Ingestion started. Run ID: $runId" -ForegroundColor Green
-Write-Host "You can monitor logs at: https://console.aws.amazon.com/glue/home#jobRun:jobName=$jobName;runId=$runId"
+# Write-Host "Ingestion started. Run ID: $runId" -ForegroundColor Green
+# Write-Host "You can monitor logs at: https://console.aws.amazon.com/glue/home#jobRun:jobName=$jobName;runId=$runId"
 
-Write-Host "--- Waiting for Ingestion to Complete ---" -ForegroundColor Yellow
-$status = "STARTING"
-while ($status -eq "STARTING" -or $status -eq "RUNNING") {
-    $status = aws glue get-job-run --job-name $jobName --run-id $runId --query "JobRun.JobRunState" --output text
-    Write-Host "Current Status: $status"
-    if ($status -eq "SUCCEEDED") {
-        Write-Host "Data is ready! You can now use the Query URL." -ForegroundColor Green
-    } elseif ($status -eq "FAILED" -or $status -eq "STOPPED") {
-        Write-Error "Glue Job failed. Check CloudWatch logs for $jobName"
-        break
-    } else {
-        Start-Sleep -Seconds 20
-    }
-}
+# Write-Host "--- Waiting for Ingestion to Complete ---" -ForegroundColor Yellow
+# $status = "STARTING"
+# while ($status -eq "STARTING" -or $status -eq "RUNNING") {
+#     $status = aws glue get-job-run --job-name $jobName --run-id $runId --query "JobRun.JobRunState" --output text
+#     Write-Host "Current Status: $status"
+#     if ($status -eq "SUCCEEDED") {
+#         Write-Host "Data is ready! You can now use the Query URL." -ForegroundColor Green
+#     } elseif ($status -eq "FAILED" -or $status -eq "STOPPED") {
+#         Write-Error "Glue Job failed. Check CloudWatch logs for $jobName"
+#         break
+#     } else {
+#         Start-Sleep -Seconds 20
+#     }
+# }
 
 #Write-Host "Follow this link to chat with your AI financial advisor: $queryUrl."
 
 # Load the outputs from the JSON file
 #$outputs = Get-Content ./outputs.json | ConvertFrom-Json
 
-# Identify the Stack Name (usually the class name in your app.py)
-# If your stack is named 'FinancialAssistantStack', it will be the key in the JSON
+# # Identify the Stack Name (usually the class name in your app.py)
+# # If your stack is named 'FinancialAssistantStack', it will be the key in the JSON
 # $stackName = 'FinancialAssistantCDKStack' #$outputs.psobject.Properties.Name[0]
-#$lambdaUrl = $outputs.$stackName.QueryLambdaUrl
-
+# #$lambdaUrl = $outputs.$stackName.QueryLambdaUrl
 
 # # Path to the frontend .env file
 # $envFilePath = "./financial-frontend/.env.local"
@@ -83,6 +82,10 @@ while ($status -eq "STARTING" -or $status -eq "RUNNING") {
 # "VITE_QUERY_URL=$QueryUrl" | Out-File -FilePath $envFilePath -Encoding utf8
 
 # Write-Host "Successfully injected Lambda URL into Frontend: $lambdaUrl" -ForegroundColor Green
+
+# cd .\financial-frontend
+# npm run dev
+
 
 $envFilePath = "$PSScriptRoot/financial-frontend/.env.local"
 # $envContent = "VITE_QUERY_URL=$lambdaUrl"
@@ -97,3 +100,4 @@ Write-Host "Injected clean UTF-8 URL to .env.local" -ForegroundColor Green
 
 Set-Location .\financial-frontend
 npm run dev
+

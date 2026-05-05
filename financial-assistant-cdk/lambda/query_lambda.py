@@ -143,7 +143,7 @@ def handler(event, context):
         model_response = json.loads(llm_response["body"].read())
         print(model_response)
         
-        answer = model_response['content'][0]['text']
+        answer = model_response['output']['message']['content'][0]['text']
 
         return {
             "statusCode": 200,

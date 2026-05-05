@@ -15,6 +15,7 @@ function App() {
   }, [messages]);
 
   const sendMessage = async () => {
+    console.log("VITE_QUERY_URL:", import.meta.env.VITE_QUERY_URL); // Is this actually a URL?
     if (!input.trim()) return;
 
     const userMessage = { role: 'user', content: input };
