@@ -150,6 +150,7 @@ def handler(event, context):
             "headers": {
                 "Content-Type": "application/json", 
                 "Access-Control-Allow-Origin": "*", # Allow the browser to read the response
+                "Access-Control-Allow-Headers": "Content-Type",
                 "Access-Control-Allow-Methods": "GET,POST,OPTIONS"
             },
             "body": json.dumps({

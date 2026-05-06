@@ -173,10 +173,10 @@ class FinancialAssistantCdkStack(Stack):
         # Create a Public URL for testing
         fn_url = self.query_lambda.add_function_url(
             auth_type=_lambda.FunctionUrlAuthType.NONE, # TODO: For MVP only!
-            cors={
-                "allowed_origins": ['*'],
-                "allowed_methods": [_lambda.HttpMethod.GET, _lambda.HttpMethod.POST]
-            }
+            # cors={
+            #     "allowed_origins": ['*'],
+            #     "allowed_methods": [_lambda.HttpMethod.GET, _lambda.HttpMethod.POST]
+            # }
         )
 
         # 1. Standard Bedrock Invoke Permission
