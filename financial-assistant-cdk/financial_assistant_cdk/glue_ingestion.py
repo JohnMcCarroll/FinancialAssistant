@@ -1,108 +1,66 @@
 import sys
 import boto3
 import chromadb
-from chromadb.config import Settings
 from bs4 import BeautifulSoup
 from awsglue.utils import getResolvedOptions
 import json
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-# Validation
-import botocore
-print(f"Boto3 version: {boto3.__version__}")
-print(f"Botocore version: {botocore.__version__}")
 
 
 # Get arguments passed from CDK
-args = getResolvedOptions(sys.argv, ['CHROMA_IP', 'BUCKET_NAME', 'ticker'])
+args = getResolvedOptions(sys.argv, ['CHROMA_IP', 'BUCKET_NAME'])
 CHROMA_IP = args['CHROMA_IP']
 BUCKET_NAME = args['BUCKET_NAME']
 
-print(f"Connecting to ChromaDB at: {CHROMA_IP}")
-print(f"Reading data from: {BUCKET_NAME}")
+print(f"ChromaDB IP: {CHROMA_IP}")
+print(f"S3 Name: {BUCKET_NAME}")
 
-# Initialize Clients
+# Initialize clients
 s3 = boto3.client('s3')
 bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
 chroma_client = chromadb.HttpClient(
     host=CHROMA_IP, 
     port=8000,
-    # tenant="default",
-    # database="default",
-    # settings=Settings(allow_reset=True)
 )
-collection = chroma_client.get_or_create_collection(name="aapl_financials")
+collection = chroma_client.get_or_create_collection(name="aapl_financials") #TODO: remove hardcoded collection name
 
 def get_embedding(text):
-    # Use Amazon Titan for embeddings
+    # Use Amazon Titan to generate semantic embedding vectors to index text chunks in vector database
     body = json.dumps({"inputText": text})
     response = bedrock.invoke_model(
         body=body, 
         modelId="amazon.titan-embed-text-v2:0"
     )
-    
-    # 1. Read the StreamingBody to get raw bytes
+    # Extract the vector from Titan response
     response_body = response['body'].read()
-    
-    # 2. Convert bytes to a Python dictionary
     response_json = json.loads(response_body)
-    
-    # 3. Extract the vector
-    return response_json['embedding']
+    vector = response_json['embedding']
+    return vector
 
 def chunk_text(text, max_chars=3000, overlap=300):
-    """
-    Splits text into manageable chunks. 
-    If a chunk is too big, it splits by sentences, then by characters.
-    """
-    # chunks = []
-    # start = 0
-    # while start < len(text):
-    #     # Determine the end of the chunk
-    #     end = start + max_chars
-    #     chunk = text[start:end]
-    #     chunks.append(chunk)
-    #     # Move start point back by overlap to keep context between chunks
-    #     start += (max_chars - overlap)
-
+    # Splits text into manageable chunks
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=max_chars, 
         chunk_overlap=overlap,
         separators=["\n\n", "\n", ".", " ", ""]
     )
     chunks = text_splitter.split_text(text)
-
     return chunks
 
-# --- Main Execution ---
-# 1. Read Raw Text from S3
-obj = s3.get_object(Bucket=BUCKET_NAME, Key="raw/AAPL/10-K.txt")
+# Read Raw Text from Data Lake
+obj = s3.get_object(Bucket=BUCKET_NAME, Key="raw/AAPL/10-K.txt") # TODO: remove hardcoded s3 key
 raw_html = obj['Body'].read().decode('utf-8')
 
-# 2. Simple Cleaning (Removing HTML tags)
+# Remove HTML tags
 soup = BeautifulSoup(raw_html, "html.parser")
 clean_text = soup.get_text(separator=' ')
 
-# 3. Hierarchical Chunking Logic
+# Hierarchical Chunking Logic
 final_chunks = chunk_text(clean_text)
 print(f"Original text length: {len(clean_text)}")
 print(f"Created {len(final_chunks)} chunks.")
 
-# for i, chunk in enumerate(final_chunks):
-#     try:
-#         vector = get_embedding(chunk)
-#         collection.add(
-#             ids=[f"chunk_{i}"],
-#             embeddings=[vector],
-#             metadatas=[{"source": "AAPL_10K_2023"}], 
-#             documents=[chunk]
-#         )
-#     except Exception as e:
-#         print(f"Failed on chunk {i}: {str(e)}")
-#         continue # Don't let one bad chunk kill the whole job
-
-# print(f"Successfully indexed {len(final_chunks)} chunks into ChromaDB.")
-
-# --- Update the Indexing Loop (Batching) ---
+# Batched chunks upload to ChromaDB
 all_ids = []
 all_embeddings = []
 all_metadatas = []
@@ -113,10 +71,10 @@ for i, chunk in enumerate(final_chunks):
         vector = get_embedding(chunk)
         all_ids.append(f"chunk_{i}")
         all_embeddings.append(vector)
-        all_metadatas.append({"source": "AAPL_10K_2023"})
+        all_metadatas.append({"source": "AAPL_10K_2023"}) # TODO: remove hardcoded chunk sourse
         all_documents.append(chunk)
         
-        # Every 100 chunks, push to the server
+        # Every 100 chunks, push to DB
         if len(all_ids) >= 100:
             collection.add(
                 ids=all_ids,
@@ -135,12 +93,11 @@ for i, chunk in enumerate(final_chunks):
 if all_ids:
     collection.add(ids=all_ids, embeddings=all_embeddings, metadatas=all_metadatas, documents=all_documents)
 
-# --- THE TRUTH TEST ---
+
+# Debugging
 print(f"VERIFICATION: Connection Host: {CHROMA_IP}")
 print(f"VERIFICATION: Final count in collection: {collection.count()}")
 print(f"VERIFICATION: Remote collections: {chroma_client.list_collections()}")
-
-# This will tell us the EXACT tenant/db names the client used
 try:
     print(f"VERIFICATION: Client Settings: {chroma_client._settings}")
 except:

@@ -1,2 +1,10 @@
 aws-cdk-lib>=2.243.0,<3.0.0
 constructs>=10.5.0,<11.0.0
+
+# log more when going through fresh installation.
+# sec-edgar-downloader
+# boto3
+# json
+# logging
+# urllib3
+# argparse

@@ -8,16 +8,3 @@ export default defineConfig({
     tailwindcss(),
   ],
 })
-
-// //debugging
-// export default defineConfig(({ mode }) => {
-//   // Load env file from the current directory
-//   const env = loadEnv(mode, process.cwd(), '');
-//   console.log('--- VITE DEBUG ---');
-//   console.log('VITE_QUERY_URL:', env.VITE_QUERY_URL);
-//   console.log('------------------');
-
-//   return {
-//     plugins: [react(), tailwindcss()],
-//   }
-// })
