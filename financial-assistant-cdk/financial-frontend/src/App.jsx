@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown'
 
 function App() {
   const [messages, setMessages] = useState([
-    { role: 'assistant', content: "Hello! I'm your financial assistant. Ask me anything about Apple's 10-K." }
+    { role: 'assistant', content: "Hello! I'm your financial assistant. Ask me anything about the stock market." }
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -15,7 +15,8 @@ function App() {
   }, [messages]);
 
   const sendMessage = async () => {
-    console.log("VITE_QUERY_URL:", import.meta.env.VITE_QUERY_URL); // Is this actually a URL?
+    // DEBUGGING
+    console.log("VITE_QUERY_URL:", import.meta.env.VITE_QUERY_URL);
     if (!input.trim()) return;
 
     const userMessage = { role: 'user', content: input };
@@ -24,11 +25,9 @@ function App() {
     setIsLoading(true);
 
     try {
-      // Replace with your actual Lambda Function URL or API Gateway endpoint
+      // Invoke lambda query function via URL
       const baseUrl = import.meta.env.VITE_QUERY_URL;
       const response = await fetch(`${baseUrl}?q=${encodeURIComponent(input)}`);
-
-      // const response = await fetch(`YOUR_LAMBDA_URL?q=${encodeURIComponent(input)}`);
       const data = await response.json();
       
       setMessages(prev => [...prev, { role: 'assistant', content: data.answer }]);
