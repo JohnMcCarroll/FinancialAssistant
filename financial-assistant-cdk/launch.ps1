@@ -47,7 +47,7 @@ Write-Host "You can monitor logs at: https://console.aws.amazon.com/glue/home#jo
 Write-Host "Waiting for Ingestion to Complete" -ForegroundColor Yellow
 $status = "STARTING"
 $attempts2 = 0
-while ($status -eq "STARTING" -or $status -eq "RUNNING" -or $attempts2 -lt 100) {
+while ($status -eq "STARTING" -or $status -eq "RUNNING") {
     $status = aws glue get-job-run --job-name $jobName --run-id $runId --query "JobRun.JobRunState" --output text
     Write-Host "Current Status: $status"
     if ($status -eq "SUCCEEDED") {
