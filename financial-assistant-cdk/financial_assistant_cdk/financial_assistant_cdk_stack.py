@@ -8,6 +8,7 @@ from aws_cdk import (
     aws_glue as glue,
     aws_lambda as _lambda,
     Duration,
+    aws_opensearchservice as opensearch,
 )
 from constructs import Construct
 
@@ -51,53 +52,38 @@ class FinancialAssistantCdkStack(Stack):
             iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSGlueServiceRole")
         )
 
-        # Output the Bucket Name to terminal
         self.export_value(self.bucket.bucket_name, name="DataLakeName")
 
-        # Security Group for ChromaDB
-        self.chroma_sg = ec2.SecurityGroup(self, "ChromaSG",
-            vpc=self.vpc,
-            allow_all_outbound=True,
-            description="Allow access to ChromaDB"
+        # Setup a basic access policy for OpenSearch access
+        access_policy = iam.PolicyStatement(
+            actions=["es:*"],
+            resources=[f"arn:aws:es:{self.region}:{self.account}:domain/financialassistantdomain/*"],
+            principals=[iam.AccountPrincipal(self.account)],
         )
 
-        # TODO: restrict IP access
-        self.chroma_sg.add_ingress_rule(
-            ec2.Peer.any_ipv4(), 
-            ec2.Port.tcp(8000), 
-            "Allow ChromaDB API access"
+        # 2. Define the "managed" OpenSearch Domain
+        self.search_domain = opensearch.Domain(self, "FinancialAssistantDomain",
+            version=opensearch.EngineVersion.OPENSEARCH_2_11,
+            capacity=opensearch.CapacityConfig(
+                data_node_instance_type="t3.small.search",
+                data_nodes=1,
+                master_nodes=0,
+                multi_az_with_standby_enabled=False
+            ),
+            ebs=opensearch.EbsOptions(
+                volume_size=10,
+                volume_type=ec2.EbsDeviceVolumeType.GP3
+            ),
+            # Security Settings
+            enforce_https=True,
+            node_to_node_encryption=True,
+            encryption_at_rest=opensearch.EncryptionAtRestOptions(enabled=True),
+            removal_policy=RemovalPolicy.DESTROY,
+            access_policies=[access_policy],
+            zone_awareness=opensearch.ZoneAwarenessConfig(enabled=False),
         )
 
-        # Define the EC2 Instance
-        instance = ec2.Instance(self, "ChromaInstance",
-            instance_type=ec2.InstanceType("t3.micro"),
-            machine_image=ec2.MachineImage.latest_amazon_linux2023(),
-            vpc=self.vpc,
-            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
-            security_group=self.chroma_sg
-        )
-
-        # Define EC2 setup script
-        user_data_script = [
-            "yum update -y",
-            "yum install -y docker",
-            # Add 2GB of Swap space
-            "dd if=/dev/zero of=/swapfile bs=128M count=16",
-            "chmod 600 /swapfile",
-            "mkswap /swapfile",
-            "swapon /swapfile",
-            "echo '/swapfile swap swap defaults 0 0' >> /etc/fstab",
-            # Start Docker
-            "systemctl start docker",
-            "systemctl enable docker",
-            "docker run -d -p 8000:8000 chromadb/chroma"
-        ]
-        
-        for line in user_data_script:
-            instance.add_user_data(line)
-
-        # Output the Public IP to terminal
-        CfnOutput(self, "ChromaPublicIP", value=instance.instance_public_ip)
+        CfnOutput(self, "OpenSearchEndpoint", value=self.search_domain.domain_endpoint)
 
         # Define the Chunk and Embed AWS Glue job
         self.ingestion_job = glue.CfnJob(self, "SEC-Ingestion-Job",
@@ -109,23 +95,31 @@ class FinancialAssistantCdkStack(Stack):
                 script_location=f"s3://{self.bucket.bucket_name}/scripts/glue_ingestion.py"
             ),
             default_arguments={
-                "--CHROMA_IP": instance.instance_public_ip,
+                "--OpenSearchEndpoint": self.search_domain.domain_endpoint,
                 "--BUCKET_NAME": self.bucket.bucket_name,
                 "--ticker": "AAPL", #TODO: remove hardcoded ticker
-                "--additional-python-modules": "sec-edgar-downloader==5.0.2,chromadb-client,boto3>=1.34.0,botocore>=1.34.0,beautifulsoup4,requests,numpy<2.0.0,langchain-text-splitters"
+                "--additional-python-modules": "sec-edgar-downloader==5.0.2,boto3>=1.34.0,botocore>=1.34.0,beautifulsoup4,requests,numpy<2.0.0,langchain-text-splitters"
             },
             max_capacity=0.0625,
             glue_version="3.0",
         )
 
-        # Define the User Query Lambda function
+        # Define lambda layer for needed dependencies
+        opensearch_layer = _lambda.LayerVersion(self, "OpenSearchLayer",
+            code=_lambda.Code.from_asset("lambda_layer"), 
+            compatible_runtimes=[_lambda.Runtime.PYTHON_3_11],
+            description="Manual layer for OpenSearch and Auth"
+        )
+
+        # Define the user Query Lambda function
         self.query_lambda = _lambda.Function(self, "QueryHandler",
             runtime=_lambda.Runtime.PYTHON_3_11,
             handler="query_lambda.handler",
             code=_lambda.Code.from_asset("lambda"),
+            layers=[opensearch_layer],
             timeout=Duration.seconds(30),
             environment={
-                "CHROMA_IP": instance.instance_public_ip,
+                "OpenSearchEndpoint": self.search_domain.domain_endpoint,
                 "COLLECTION_NAME": "aapl_financials" # TODO: remove hardcoded collection name
             }
         )
@@ -136,7 +130,7 @@ class FinancialAssistantCdkStack(Stack):
             resources=["*"]
         ))
 
-        # Create a Public Lambda URL
+        # Create Lambda URL
         fn_url = self.query_lambda.add_function_url(
             auth_type=_lambda.FunctionUrlAuthType.NONE, # TODO: add authentication
         )
@@ -144,3 +138,7 @@ class FinancialAssistantCdkStack(Stack):
         # Output needed asset info to terminal
         CfnOutput(self, "QueryUrl", value=fn_url.url)
         CfnOutput(self, "GlueJobName", value=self.ingestion_job.name)
+
+        # Grant access
+        self.search_domain.grant_read_write(self.glue_role)
+        self.search_domain.grant_read_write(self.query_lambda)

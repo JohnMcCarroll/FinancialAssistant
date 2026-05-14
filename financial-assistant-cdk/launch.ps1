@@ -4,35 +4,20 @@ cdk deploy --require-approval never
 
 # Collect and parse CDK stack deployment outputs (names, urls, and UIDs of cloud assets)
 $outputs = aws cloudformation describe-stacks --stack-name FinancialAssistantCdkStack --query "Stacks[0].Outputs" | ConvertFrom-Json
-$ip = ($outputs | Where-Object { $_.OutputKey -eq "ChromaPublicIP" }).OutputValue
+$OpenSearchEndpoint = ($outputs | Where-Object { $_.OutputKey -eq "OpenSearchEndpoint" }).OutputValue
 $queryUrl = ($outputs | Where-Object { $_.OutputKey -eq "QueryUrl" }).OutputValue
 $jobName = ($outputs | Where-Object { $_.OutputKey -eq "GlueJobName" }).OutputValue
 $bucketName = ($outputs | Where-Object { $_.OutputKey -eq "ExportDataLakeName" }).OutputValue
 $ticker = "AAPL" #TODO: remove hardcoded ticker value
 
+# Initialize OpenSearch index (non-relational schema)
+Write-Host "Initializing OpenSearch Index and Vector Mapping..." -ForegroundColor Cyan
+python ./scripts/initialize_opensearch.py --endpoint $OpenSearchEndpoint --index "aapl_financials"
+
+
 # Download SEC data locally and upload to S3 Data Lake
-Write-Host "Running Local SEC Data Ingestion" -ForegroundColor Yellow
-python financial_assistant_cdk\ingest_sec_data.py --bucket_name $bucketName --ticker $ticker
-
-# Ping ChromaDB until it responds
-Write-Host "Waiting for ChromaDB Heartbeat" -ForegroundColor Yellow
-$heartbeatUrl = "http://$($ip):8000/api/v2/heartbeat"
-$ready = $false
-$attempts = 0
-
-while (-not $ready -and $attempts -lt 30) {
-    try {
-        $response = Invoke-RestMethod -Uri $heartbeatUrl -Method Get -ErrorAction Stop
-        if ($response) {
-            $ready = $true
-            Write-Host "`nChromaDB is online!" -ForegroundColor Green
-        }
-    } catch {
-        $attempts++
-        Write-Host "." -NoNewline
-        Start-Sleep -Seconds 10
-    }
-}
+Write-Host "Collecting SEC Data for $ticker..." -ForegroundColor Yellow
+python financial_assistant_cdk/ingest_sec_data.py --bucket_name $bucketName --ticker $ticker
 
 # Upload AWS Glue data processing script to S3 bucket
 Write-Host "Uploading AWS Glue Data Chunking and Embedding Script to Data Lake" -ForegroundColor Yellow

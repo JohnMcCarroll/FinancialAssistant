@@ -1,40 +1,39 @@
 import json
 import os
 import boto3
-import urllib3
 import logging
+from opensearchpy import OpenSearch, RequestsHttpConnection
+from requests_aws4auth import AWS4Auth
 
 
-# Define constants by collecting AWS asset info from the environment
-CHROMA_IP = os.environ.get('CHROMA_IP')
-COLLECTION_NAME = os.environ.get('COLLECTION_NAME', 'aapl_financials') # TODO: extend to multiple collections
-CHROMA_URL = f"http://{CHROMA_IP}:8000/api/v2/tenants/default_tenant/databases/default_database"
+# Define constants
+OpenSearchEndpoint = os.environ.get('OpenSearchEndpoint')
+INDEX_NAME = os.environ.get('COLLECTION_NAME', 'aapl_financials') # TODO: extend to multiple collections
 
-# Setup Logger
+# Setup logger
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Setup LLM and HTTP clients
+# Setup LLM client
 bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
-http = urllib3.PoolManager()
 
-def get_collection_id():
-    # Fetches the UID for processed data's collection name
-    try:
-        response = http.request('GET', f"{CHROMA_URL}/collections")
-        collections = json.loads(response.data)
-
-        # Log processed data in ChromaDB
-        found_names = [c['name'] for c in collections]
-        logger.info(f"Collections in DB: {found_names}")
-
-        for col in collections:
-            if col['name'] == COLLECTION_NAME:
-                return col['id']
-
-        raise Exception(f"Collection '{COLLECTION_NAME}' not found. \nCollections found: {str(found_names)}")
-    except Exception as e:
-        raise Exception(f"Failed to fetch collection ID: {str(e)}")
+def get_opensearch_client(endpoint):
+    service = 'es'
+    region = 'us-east-1'
+    credentials = boto3.Session().get_credentials()
+    awsauth = AWS4Auth(credentials.access_key, credentials.secret_key, 
+                       region, service, session_token=credentials.token)
+    client = OpenSearch(
+        hosts=[{'host': endpoint, 'port': 443}],
+        http_auth=awsauth,
+        use_ssl=True,
+        verify_certs=True,
+        connection_class=RequestsHttpConnection,
+        max_retries=5,
+        retry_on_timeout=True,
+        timeout=30
+    )
+    return client
 
 def get_embedding(text):
     # Pass chunk of source text to embedding model and return semantic vector
@@ -43,7 +42,8 @@ def get_embedding(text):
         body=body, 
         modelId="amazon.titan-embed-text-v2:0"
     )
-    return json.loads(response['body'].read())['embedding']
+    embedding = json.loads(response['body'].read())['embedding']
+    return embedding
 
 def handler(event, context):
     # Called when Lambda function invoked, this function is responsible for coordinating the interaction
@@ -51,9 +51,15 @@ def handler(event, context):
     # for relevant text data, said data is injected into a prompt with the user's question, the prompt is
     # sent to the LLM, and the LLM's answer is packaged into an HTTP response.
     try:
-        # Fetch collection ID
-        collection_id = get_collection_id()
-        logger.info(f"Resolved Collection ID for '{COLLECTION_NAME}': {collection_id}")
+        client = get_opensearch_client(OpenSearchEndpoint)
+
+
+        # debugging: check entries in opensearch
+        res = client.search(index=INDEX_NAME, body={"size": 3, "query": {"match_all": {}}})
+        for hit in res['hits']['hits']:
+            print(f"ID: {hit['_id']}")
+            print(f"Text Preview: {hit['_source']['text'][:500]}...") 
+            print("-" * 50)
 
         # Parse the user's question
         user_query = "What are Apple's supply chain risks?"
@@ -64,28 +70,27 @@ def handler(event, context):
         query_vector = get_embedding(user_query)
         logger.info(f"Query Vector (first 5 dims): {query_vector[:5]}")
 
-        # Query ChromaDB via API TODO: use chromadb-client
-        search_payload = {
-            "query_embeddings": [query_vector],
-            "n_results": 5
+        # k-NN index search in vector database
+        search_query = {
+            "size": 5,
+            "query": {
+                "knn": {
+                    "embedding": {
+                        "vector": query_vector,
+                        "k": 5
+                    }
+                }
+            }
         }
-        res = http.request(
-            'POST', 
-            f"{CHROMA_URL}/collections/{collection_id}/query", 
-            body=json.dumps(search_payload),
-            headers={'Content-Type': 'application/json'}
+        response = client.search(
+            body=search_query,
+            index=INDEX_NAME
         )
-
-        # DEBUGGING ChromaDB connection
-        if res.status != 200:
-            logger.info(
-                f"Error connecting to ChromaDB API.\nStatus: {res.status}\n{res.data.decode('utf-8')}"
-            )
-
-        results = json.loads(res.data)
+        hits = response['hits']['hits']
+        retrieved_chunks = [hit['_source']['text'] for hit in hits]
+        context_text = "\n\n".join(retrieved_chunks)
         
         # Construct the LLM prompt
-        context_text = "\n\n".join(results['documents'][0])
         prompt = f"""
         You are a senior financial analyst.
         Below are contextually relevant excerpts from company 10-K filings and earnings call transcripts.
@@ -96,7 +101,7 @@ def handler(event, context):
         Question: {user_query}
         """
 
-        logger.info(f"FINAL RAG PROMPT SENT TO CLAUDE:\n{prompt}")
+        logger.info(f"FINAL RAG PROMPT SENT TO LLM:\n{prompt}")
 
         # Send prompt to LLM
         model_id = "us.amazon.nova-lite-v1:0"
@@ -130,13 +135,13 @@ def handler(event, context):
             "statusCode": 200,
             "headers": {
                 "Content-Type": "application/json", 
-                "Access-Control-Allow-Origin": "*", # Allow the browser to read the response
+                "Access-Control-Allow-Origin": "*", # Bypass browser CORS?
                 "Access-Control-Allow-Headers": "Content-Type",
                 "Access-Control-Allow-Methods": "GET,POST,OPTIONS"
             },
             "body": json.dumps({
                 "answer": answer,
-                "source_chunks_found": len(results['documents'][0])
+                "source_chunks_found": len(retrieved_chunks)
             })
         }
     except Exception as e:

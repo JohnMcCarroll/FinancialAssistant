@@ -19,14 +19,13 @@ def main():
 
     # Download the 10-K from SEC database
     dl = Downloader("MyProject", EMAIL)
-    # Download the most recent 10-K for Apple
     dl.get("10-K", TICKER, after="2023-01-01", download_details=False)
 
     base_path = f"sec-edgar-filings/{TICKER}/10-K"
     latest_folder = sorted(os.listdir(base_path))[-1]
     file_path = os.path.join(base_path, latest_folder, "full-submission.txt")
 
-    # Upload to S3 Bucket
+    # Upload to S3 bucket
     s3 = boto3.client('s3')
     s3_key = f"raw/{TICKER}/10-K.txt"
 

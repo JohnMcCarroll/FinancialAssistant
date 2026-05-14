@@ -4,36 +4,17 @@ cdk deploy --require-approval never
 
 # Collect and parse CDK stack deployment outputs (names, urls, and UIDs of cloud assets)
 $outputs = aws cloudformation describe-stacks --stack-name FinancialAssistantCdkStack --query "Stacks[0].Outputs" | ConvertFrom-Json
-$ip = ($outputs | Where-Object { $_.OutputKey -eq "ChromaPublicIP" }).OutputValue
+$OpenSearchEndpoint = ($outputs | Where-Object { $_.OutputKey -eq "OpenSearchEndpoint" }).OutputValue
 $queryUrl = ($outputs | Where-Object { $_.OutputKey -eq "QueryUrl" }).OutputValue
 $jobName = ($outputs | Where-Object { $_.OutputKey -eq "GlueJobName" }).OutputValue
 $bucketName = ($outputs | Where-Object { $_.OutputKey -eq "ExportDataLakeName" }).OutputValue
-# $ticker = "AAPL" #TODO: remove hardcoded ticker value
+$ticker = "AAPL" #TODO: remove hardcoded ticker value
 
 # # Download SEC data locally and upload to S3 Data Lake
 # Write-Host "Running Local SEC Data Ingestion" -ForegroundColor Yellow
 # python financial_assistant_cdk\ingest_sec_data.py --bucket_name $bucketName --ticker $ticker
 
-# Ping ChromaDB until it responds
-Write-Host "Waiting for ChromaDB Heartbeat" -ForegroundColor Yellow
-$heartbeatUrl = "http://$($ip):8000/api/v2/heartbeat"
-$ready = $false
-$attempts = 0
-
-while (-not $ready -and $attempts -lt 30) {
-    try {
-        $response = Invoke-RestMethod -Uri $heartbeatUrl -Method Get -ErrorAction Stop
-        if ($response) {
-            $ready = $true
-            Write-Host "`nChromaDB is online!" -ForegroundColor Green
-        }
-    } catch {
-        $attempts++
-        Write-Host "." -NoNewline
-        Start-Sleep -Seconds 10
-    }
-}
-
+# ### AWS GLUE - DATA PROCESSING (CHUNKING + EMBEDDING)
 # # Upload AWS Glue data processing script to S3 bucket
 # Write-Host "Uploading AWS Glue Data Chunking and Embedding Script to Data Lake" -ForegroundColor Yellow
 # aws s3 cp ./financial_assistant_cdk/glue_ingestion.py "s3://$($bucketName)/scripts/glue_ingestion.py"
@@ -47,7 +28,7 @@ while (-not $ready -and $attempts -lt 30) {
 # Write-Host "Waiting for Ingestion to Complete" -ForegroundColor Yellow
 # $status = "STARTING"
 # $attempts2 = 0
-# while ($status -eq "STARTING" -or $status -eq "RUNNING" -or $attempts2 -lt 100) {
+# while ($status -eq "STARTING" -or $status -eq "RUNNING") {
 #     $status = aws glue get-job-run --job-name $jobName --run-id $runId --query "JobRun.JobRunState" --output text
 #     Write-Host "Current Status: $status"
 #     if ($status -eq "SUCCEEDED") {
@@ -61,6 +42,8 @@ while (-not $ready -and $attempts -lt 30) {
 #     }
 # }
 
+
+### FRONT END WEBSITE
 # Save Lambda function URL to file for front-end javascript retrieval
 Write-Host "Connecting to frontend" -ForegroundColor Yellow
 $envFilePath = "$PSScriptRoot/financial-frontend/.env.local"
