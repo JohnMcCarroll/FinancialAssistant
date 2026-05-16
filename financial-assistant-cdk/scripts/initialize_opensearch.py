@@ -36,7 +36,7 @@ def initialize_index(endpoint, index_name):
                     "dimension": 1024,
                     "method": {
                         "name": "hnsw",
-                        "space_type": "cosinesimil",
+                        "space_type": "innerproduct",
                         "engine": "faiss",
                         "parameters": {
                             "ef_construction": 128,
@@ -58,8 +58,8 @@ def initialize_index(endpoint, index_name):
 
     # Create the index
     try:
-        if not client.indices.exists(index_name):
-            client.indices.create(index_name, body=index_body)
+        if not client.indices.exists(index=index_name):
+            client.indices.create(index=index_name, body=index_body)
         else:
             print(f"Index '{index_name}' already exists. Skipping initialization.")
     except Exception as e:

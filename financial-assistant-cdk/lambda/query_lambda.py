@@ -135,9 +135,9 @@ def handler(event, context):
             "statusCode": 200,
             "headers": {
                 "Content-Type": "application/json", 
-                "Access-Control-Allow-Origin": "*", # Bypass browser CORS?
-                "Access-Control-Allow-Headers": "Content-Type",
-                "Access-Control-Allow-Methods": "GET,POST,OPTIONS"
+                # "Access-Control-Allow-Origin": "*", # Bypass browser CORS?
+                # "Access-Control-Allow-Headers": "Content-Type",
+                # "Access-Control-Allow-Methods": "GET,POST,OPTIONS"
             },
             "body": json.dumps({
                 "answer": answer,
@@ -146,4 +146,13 @@ def handler(event, context):
         }
     except Exception as e:
         logger.error(f"Error: {str(e)}", exc_info=True)
-        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
+        return {
+            "statusCode": 500,
+            "headers": {
+                "Content-Type": "application/json", 
+                # "Access-Control-Allow-Origin": "*", # Bypass browser CORS?
+                # "Access-Control-Allow-Headers": "Content-Type",
+                # "Access-Control-Allow-Methods": "GET,POST,OPTIONS"
+            },
+            "body": json.dumps({"error": str(e)})
+        }

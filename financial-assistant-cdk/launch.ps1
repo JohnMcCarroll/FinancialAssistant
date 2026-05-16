@@ -15,9 +15,9 @@ Write-Host "Initializing OpenSearch Index and Vector Mapping..." -ForegroundColo
 python ./scripts/initialize_opensearch.py --endpoint $OpenSearchEndpoint --index "aapl_financials"
 
 
-# Download SEC data locally and upload to S3 Data Lake
-Write-Host "Collecting SEC Data for $ticker..." -ForegroundColor Yellow
-python financial_assistant_cdk/ingest_sec_data.py --bucket_name $bucketName --ticker $ticker
+# # Download SEC data locally and upload to S3 Data Lake
+# Write-Host "Collecting SEC Data for $ticker..." -ForegroundColor Yellow
+# python financial_assistant_cdk/ingest_sec_data.py --bucket_name $bucketName --ticker $ticker
 
 # Upload AWS Glue data processing script to S3 bucket
 Write-Host "Uploading AWS Glue Data Chunking and Embedding Script to Data Lake" -ForegroundColor Yellow

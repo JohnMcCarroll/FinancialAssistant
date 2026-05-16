@@ -7,6 +7,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from opensearchpy import OpenSearch, RequestsHttpConnection, helpers
 from requests_aws4auth import AWS4Auth
 import time
+import re
 
 
 # Get arguments passed from CDK
@@ -37,6 +38,33 @@ openSearchClient = OpenSearch(
     retry_on_timeout=True,
     timeout=30
 )
+
+# Ensure index exists
+if not openSearchClient.indices.exists(index=INDEX_NAME):
+    raise Exception("Target OpenSearch index does not exist.")
+#     index_body = {
+#         "settings": {
+#             "index": {
+#                 "knn": True
+#             }
+#         },
+#         "mappings": {
+#             "properties": {
+#                 "embedding": {
+#                     "type": "knn_vector",
+#                     "dimension": 1024, # Dimension for Titan v2
+#                     "method": {
+#                         "name": "hnsw",
+#                         "space_type": "l2",
+#                         "engine": "nmslib"
+#                     }
+#                 },
+#                 "text": {"type": "text"},
+#                 "metadata": {"type": "object"}
+#             }
+#         }
+#     }
+#     openSearchClient.indices.create(index=INDEX_NAME, body=index_body)
 
 def get_embedding(text):
     # Use Amazon Titan to generate semantic embedding vectors to index text chunks in vector database
@@ -84,11 +112,80 @@ raw_html = obj['Body'].read().decode('utf-8')
 # soup = BeautifulSoup(raw_html, "html.parser")
 # clean_text = soup.get_text(separator=' ')
 
-# New parsing attempt
-soup = BeautifulSoup(raw_html, "lxml")
-for tag in soup(["script", "style", "xbrl", "xml", "ix:nonnumeric", "ix:nonfraction"]):
-    tag.decompose()
-clean_text = soup.get_text(separator=' ', strip=True)
+# # New parsing attempt
+# print(raw_html)
+# doc_match = re.search(r'<html.*?>.*?</html>', raw_html, re.DOTALL | re.IGNORECASE)
+# if doc_match:
+#     clean_content = doc_match.group(0)
+# else:
+#     # Fallback: if the tag style is non-standard, scrub lines that look like uuencoded strings
+#     print("Warning: Standard 10-K document tags not found. Applying aggressive line filter.")
+#     lines = raw_html.split('\n')
+#     # Uuencoded lines typically start with 'M', are exactly 61 chars long, and contain heavy punctuation
+#     filtered_lines = [l for l in lines if not (len(l) >= 60 and l.startswith('M') and any(c in l for c in '$%@&!'))]
+#     clean_content = '\n'.join(filtered_lines)
+# soup = BeautifulSoup(raw_html, "lxml")
+# for tag in soup(["script", "style", "xbrl", "xml", "ix:nonnumeric", "ix:nonfraction"]):
+#     tag.decompose()
+# clean_text = soup.get_text(separator=' ', strip=True)
+# clean_text = re.sub(r'\s+', ' ', clean_text)
+
+# new new parsing attempt
+def clean_sec_html(raw_sec_download):
+    print('RAW')
+    print(raw_sec_download)
+
+    soup1 = BeautifulSoup(raw_html, "html.parser")
+    clean_text1 = soup1.get_text(separator=' ')
+    print("HTML PARSE (OLD)")
+    print(clean_text1)
+
+    # 1. Isolate the true HTML document out of the SEC submission text file
+    html_match = re.search(r'<html.*?>.*?</html>', raw_sec_download, re.DOTALL | re.IGNORECASE)
+    if not html_match:
+        print('NOT MATCH')
+        # Fallback if the document is pre-iXBRL or raw text
+        return raw_sec_download
+        
+    html_content = html_match.group(0)
+    print("HTML_CONTENT")
+    print(html_content)
+    
+    # 2. Parse with lxml
+    soup = BeautifulSoup(html_content, 'lxml')
+    
+    # 3. Target and vaporize the iXBRL metadata headers
+    # These tags hold the machine-readable "gibberish"
+    ix_tags_to_drop = ['ix:header', 'ix:hidden', 'ix:resources', 'xbrli:context', 'xbrli:unit']
+    for tag_name in ix_tags_to_drop:
+        for element in soup.find_all(tag_name):
+            element.decompose()
+            
+    # 4. Nuclear option for anything explicitly hidden via inline CSS
+    for hidden_div in soup.find_all(style=True):
+        style_string = hidden_div['style'].replace(" ", "").lower()
+        if "display:none" in style_string:
+            hidden_div.decompose()
+            
+    # 5. Clean up standard noisy tags you don't want embedded
+    for tag_name in ['script', 'style', 'noscript']:
+        for element in soup.find_all(tag_name):
+            element.decompose()
+
+    # 6. Extract clean text
+    # Using strip=True and a newline separator keeps tables from running together
+    clean_text = soup.get_text(separator="\n", strip=True)
+    
+    # Optional: Collapse egregious multi-newlines left behind by decomposed blocks
+    clean_text = re.sub(r'\n+', '\n', clean_text)
+
+    print("CLEAN")
+    print(clean_text)
+    
+    return clean_text
+
+
+clean_text = clean_sec_html(raw_html)
 
 # Chunking Logic # TODO: implement hierarchical chunking
 final_chunks = chunk_text(clean_text)

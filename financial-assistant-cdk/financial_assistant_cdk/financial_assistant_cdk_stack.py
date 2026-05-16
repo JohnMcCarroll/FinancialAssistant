@@ -9,6 +9,8 @@ from aws_cdk import (
     aws_lambda as _lambda,
     Duration,
     aws_opensearchservice as opensearch,
+    aws_sqs as sqs,
+    aws_lambda_event_sources as sources,
 )
 from constructs import Construct
 
@@ -35,6 +37,51 @@ class FinancialAssistantCdkStack(Stack):
             auto_delete_objects=True
         )
 
+        self.export_value(self.bucket.bucket_name, name="DataLakeName")
+
+        
+
+
+        # Create the SQS Queue
+        # We add a visibility timeout to ensure the Lambda has time to finish 
+        # before SQS tries to give the message to someone else.
+        sec_queue = sqs.Queue(
+            self, "SecDownloadQueue",
+            visibility_timeout=Duration.minutes(60) 
+        )
+
+        # Define the data ingestion Lambda
+        sec_ingest_lambda = _lambda.Function(
+            self, "SecIngestHandler",
+            runtime=_lambda.Runtime.PYTHON_3_9,
+            handler="ingestion_lambda.handler",
+            code=_lambda.Code.from_asset("lambda"),
+            timeout=Duration.minutes(10),
+            memory_size=512,
+            # # Rate limiting
+            # reserved_concurrent_executions=1, 
+            environment={
+                "BUCKET_NAME": self.bucket.bucket_name,
+                "QUEUE_URL": sec_queue.queue_url
+            }
+        )
+
+        # Add the SQS trigger to ingestion lambda
+        sec_ingest_lambda.add_event_source(
+            sources.SqsEventSource(
+                sec_queue,
+                batch_size=1, # Only process one ticker/year message at a time
+                max_concurrency=2,
+            )
+        )
+
+        # Grant the Lambda permission to read from the queue
+        sec_queue.grant_consume_messages(sec_ingest_lambda)
+
+
+
+
+
         # Create a role for AWS Glue
         self.glue_role = iam.Role(self, "GlueIngestionRole",
             assumed_by=iam.ServicePrincipal("glue.amazonaws.com")
@@ -51,8 +98,6 @@ class FinancialAssistantCdkStack(Stack):
         self.glue_role.add_managed_policy(
             iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSGlueServiceRole")
         )
-
-        self.export_value(self.bucket.bucket_name, name="DataLakeName")
 
         # Setup a basic access policy for OpenSearch access
         access_policy = iam.PolicyStatement(
@@ -133,6 +178,12 @@ class FinancialAssistantCdkStack(Stack):
         # Create Lambda URL
         fn_url = self.query_lambda.add_function_url(
             auth_type=_lambda.FunctionUrlAuthType.NONE, # TODO: add authentication
+            cors=_lambda.FunctionUrlCorsOptions(
+                allowed_origins=["*"],
+                allowed_methods=[_lambda.HttpMethod.GET, _lambda.HttpMethod.POST],
+                allowed_headers=["content-type", "authorization"],
+                max_age=Duration.days(1)
+            )
         )
 
         # Output needed asset info to terminal
