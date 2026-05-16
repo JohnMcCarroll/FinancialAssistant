@@ -50,20 +50,28 @@ class FinancialAssistantCdkStack(Stack):
             visibility_timeout=Duration.minutes(60) 
         )
 
+        self.export_value(sec_queue.queue_url, name="SQSURL")
+
+        # Define lambda layer for needed dependencies
+        lambda_layer = _lambda.LayerVersion(self, "OpenSearchLayer",
+            code=_lambda.Code.from_asset("lambda_layer"), 
+            compatible_runtimes=[_lambda.Runtime.PYTHON_3_11],
+            description="Manual layer for OpenSearch, Auth, and SEC Downloads"
+        )
+
         # Define the data ingestion Lambda
         sec_ingest_lambda = _lambda.Function(
             self, "SecIngestHandler",
-            runtime=_lambda.Runtime.PYTHON_3_9,
+            runtime=_lambda.Runtime.PYTHON_3_11,
             handler="ingestion_lambda.handler",
             code=_lambda.Code.from_asset("lambda"),
             timeout=Duration.minutes(10),
             memory_size=512,
-            # # Rate limiting
-            # reserved_concurrent_executions=1, 
             environment={
                 "BUCKET_NAME": self.bucket.bucket_name,
                 "QUEUE_URL": sec_queue.queue_url
-            }
+            },
+            layers=[lambda_layer]
         )
 
         # Add the SQS trigger to ingestion lambda
@@ -75,29 +83,33 @@ class FinancialAssistantCdkStack(Stack):
             )
         )
 
-        # Grant the Lambda permission to read from the queue
+        # Grant the Lambda permission to read from the queue + write to s3
         sec_queue.grant_consume_messages(sec_ingest_lambda)
-
+        self.bucket.grant_put(sec_ingest_lambda)
 
 
 
 
         # Create a role for AWS Glue
         self.glue_role = iam.Role(self, "GlueIngestionRole",
-            assumed_by=iam.ServicePrincipal("glue.amazonaws.com")
+            assumed_by=iam.ServicePrincipal("glue.amazonaws.com"),
+            managed_policies=[
+                iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSGlueServiceRole")
+            ]
         )
 
-        # Give role access to S3 and Bedrock
+        # Give role access to S3 and Bedrock and OpenSearch
         self.bucket.grant_read_write(self.glue_role)
         self.glue_role.add_to_policy(iam.PolicyStatement(
             actions=["bedrock:InvokeModel"],
             resources=["*"] #TODO: specific model scope
         ))
+        # TODO: need OpenSearch write permission?
 
-        # Give Glue the base read/write permissions
-        self.glue_role.add_managed_policy(
-            iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSGlueServiceRole")
-        )
+        # # Give Glue the base read/write permissions
+        # self.glue_role.add_managed_policy(
+        #     iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSGlueServiceRole")
+        # )
 
         # Setup a basic access policy for OpenSearch access
         access_policy = iam.PolicyStatement(
@@ -130,30 +142,43 @@ class FinancialAssistantCdkStack(Stack):
 
         CfnOutput(self, "OpenSearchEndpoint", value=self.search_domain.domain_endpoint)
 
-        # Define the Chunk and Embed AWS Glue job
-        self.ingestion_job = glue.CfnJob(self, "SEC-Ingestion-Job",
-            name="SEC-Ingestion-and-Embedding",
+        # # Define the Chunk and Embed AWS Glue job
+        # self.ingestion_job = glue.CfnJob(self, "SEC-Ingestion-Job",
+        #     name="SEC-Ingestion-and-Embedding",
+        #     role=self.glue_role.role_arn,
+        #     command=glue.CfnJob.JobCommandProperty(
+        #         name="pythonshell",
+        #         python_version="3.9",
+        #         script_location=f"s3://{self.bucket.bucket_name}/scripts/glue_ingestion.py"
+        #     ),
+        #     default_arguments={
+        #         "--OpenSearchEndpoint": self.search_domain.domain_endpoint,
+        #         "--BUCKET_NAME": self.bucket.bucket_name,
+        #         "--ticker": "AAPL", #TODO: remove hardcoded ticker
+        #         "--additional-python-modules": "sec-edgar-downloader==5.0.2,boto3>=1.34.0,botocore>=1.34.0,beautifulsoup4,requests,numpy<2.0.0,langchain-text-splitters"
+        #     },
+        #     max_capacity=0.0625,
+        #     glue_version="3.0",
+        # )
+
+        # Define the Chunk and Embed AWS Glue job (streaming version)
+        self.ingestion_job = glue.CfnJob(self, "SEC-Processing-Job",
+            name="SEC-Stream-Chunking-and-Embedding",
             role=self.glue_role.role_arn,
             command=glue.CfnJob.JobCommandProperty(
-                name="pythonshell",
-                python_version="3.9",
-                script_location=f"s3://{self.bucket.bucket_name}/scripts/glue_ingestion.py"
+                name="gluestreaming",
+                python_version="3",
+                script_location=f"s3://{self.bucket.bucket_name}/scripts/streaming_pipeline.py"
             ),
+            glue_version="4.0",
+            worker_type="G.1X",
+            number_of_workers=2, # TODO: minimum (increase if bedrock API can handle it)
             default_arguments={
-                "--OpenSearchEndpoint": self.search_domain.domain_endpoint,
+                "--job-bookmark-option": "job-bookmark-disable",  # Streaming relies on Spark checkpoints instead
+                "--CHECKPOINT_DIR": f"s3://{self.bucket.bucket_name}/glue_checkpoints/sec_stream",
+                "--OPENSEARCH_ENDPOINT": self.search_domain.domain_endpoint,
                 "--BUCKET_NAME": self.bucket.bucket_name,
-                "--ticker": "AAPL", #TODO: remove hardcoded ticker
-                "--additional-python-modules": "sec-edgar-downloader==5.0.2,boto3>=1.34.0,botocore>=1.34.0,beautifulsoup4,requests,numpy<2.0.0,langchain-text-splitters"
-            },
-            max_capacity=0.0625,
-            glue_version="3.0",
-        )
-
-        # Define lambda layer for needed dependencies
-        opensearch_layer = _lambda.LayerVersion(self, "OpenSearchLayer",
-            code=_lambda.Code.from_asset("lambda_layer"), 
-            compatible_runtimes=[_lambda.Runtime.PYTHON_3_11],
-            description="Manual layer for OpenSearch and Auth"
+            }
         )
 
         # Define the user Query Lambda function
@@ -161,7 +186,7 @@ class FinancialAssistantCdkStack(Stack):
             runtime=_lambda.Runtime.PYTHON_3_11,
             handler="query_lambda.handler",
             code=_lambda.Code.from_asset("lambda"),
-            layers=[opensearch_layer],
+            layers=[lambda_layer],
             timeout=Duration.seconds(30),
             environment={
                 "OpenSearchEndpoint": self.search_domain.domain_endpoint,
