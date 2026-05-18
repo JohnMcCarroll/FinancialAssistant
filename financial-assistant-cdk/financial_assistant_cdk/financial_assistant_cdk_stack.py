@@ -11,6 +11,7 @@ from aws_cdk import (
     aws_opensearchservice as opensearch,
     aws_sqs as sqs,
     aws_lambda_event_sources as sources,
+    aws_s3_notifications as s3n,
 )
 from constructs import Construct
 
@@ -161,6 +162,38 @@ class FinancialAssistantCdkStack(Stack):
         #     glue_version="3.0",
         # )
 
+
+        # AWS SQS FOR CHUNKING QUEUE
+        # 1. Create the dedicated Ingestion SQS Queue
+        # (We add a visibility timeout to give Spark workers time to process heavy files)
+        ingestion_queue = sqs.Queue(
+            self, "SecIngestionQueue",
+            visibility_timeout=Duration.minutes(15), 
+            retention_period=Duration.days(7)
+        )
+
+        # 2. Configure S3 to send notifications to SQS on new file creation inside /raw
+        self.bucket.add_event_notification(
+            s3.EventType.OBJECT_CREATED,
+            s3n.SqsDestination(ingestion_queue),
+            s3.NotificationKeyFilter(prefix="raw/", suffix=".txt") # Adjust suffix to match your files
+        )
+
+        # 3. Grant the Glue Job Role permissions to read and delete from the SQS queue
+        glue_sqs_policy = iam.PolicyStatement(
+            actions=[
+                "sqs:ReceiveMessage",
+                "sqs:DeleteMessage",
+                "sqs:GetQueueAttributes",
+                "sqs:ChangeMessageVisibility"
+            ],
+            resources=[ingestion_queue.queue_arn]
+        )
+        self.glue_role.add_to_policy(glue_sqs_policy)
+
+
+
+
         # Define the Chunk and Embed AWS Glue job (streaming version)
         self.ingestion_job = glue.CfnJob(self, "SEC-Processing-Job",
             name="SEC-Stream-Chunking-and-Embedding",
@@ -178,6 +211,10 @@ class FinancialAssistantCdkStack(Stack):
                 "--CHECKPOINT_DIR": f"s3://{self.bucket.bucket_name}/glue_checkpoints/sec_stream",
                 "--OPENSEARCH_ENDPOINT": self.search_domain.domain_endpoint,
                 "--BUCKET_NAME": self.bucket.bucket_name,
+                # 4. Pass the SQS Queue URL to your Glue Job environment variables or arguments
+                # inside your Glue Job definition arguments block:
+                "--INGESTION_QUEUE_URL": ingestion_queue.queue_url,
+                "--additional-python-modules": "boto3>=1.34.0,botocore>=1.34.0,beautifulsoup4==4.12.3,lxml==5.1.0,langchain-text-splitters==0.2.0,opensearch-py==2.5.0,requests-aws4auth==1.2.3",
             }
         )
 
@@ -218,3 +255,16 @@ class FinancialAssistantCdkStack(Stack):
         # Grant access
         self.search_domain.grant_read_write(self.glue_role)
         self.search_domain.grant_read_write(self.query_lambda)
+
+        # # attempt param permission
+        # ssm_policy_statement = iam.PolicyStatement(
+        #     actions=["ssm:PutParameter"],
+        #     resources=[
+        #         f"arn:aws:ssm:{self.region}:{self.account}:parameter/financial-datalake/sec-stream/status"
+        #     ]
+        # )
+
+        # # 2. Attach it to your Glue Job's role
+        # # If you defined the role explicitly:
+        # self.glue_role.add_to_policy(ssm_policy_statement)
+

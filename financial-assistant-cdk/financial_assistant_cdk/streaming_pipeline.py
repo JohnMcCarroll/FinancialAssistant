@@ -1,41 +1,39 @@
 import sys
 import boto3
+import json
 import time
+from urllib.parse import unquote_plus
 from awsglue.utils import getResolvedOptions
 from pyspark.context import SparkContext
 from awsglue.context import GlueContext
 from awsglue.job import Job
-from pyspark.sql.types import StructType, StructField, StringType, BinaryType, LongType, TimestampType
-
 
 # Extract runtime arguments
-args = getResolvedOptions(sys.argv, ['JOB_NAME', 'CHECKPOINT_DIR', 'OPENSEARCH_ENDPOINT', 'BUCKET_NAME'])
+args = getResolvedOptions(sys.argv, ['JOB_NAME', 'INGESTION_QUEUE_URL', 'OPENSEARCH_ENDPOINT'])
 
-# Define constants
-INDEX_NAME = "aapl_financials" # TODO: rename
+INDEX_NAME = "aapl_financials"
 OPENSEARCH_ENDPOINT = args['OPENSEARCH_ENDPOINT']
-BUCKET_NAME = args['BUCKET_NAME']
+QUEUE_URL = args['INGESTION_QUEUE_URL']
 
-# Initialize Spark & Glue contexts
+# Initialize contexts
 sc = SparkContext()
 glueContext = GlueContext(sc)
 spark = glueContext.spark_session
 job = Job(glueContext)
 job.init(args['JOB_NAME'], args)
 
-# Worker Node Partition Processing Logic
+# =====================================================================
+# WORKER NODE: PARALLEL PROCESSING LOGIC (Executed on cluster executors)
+# =====================================================================
 def process_partition(records):
-    # Cluster-safe imports executed directly on worker environments
     import boto3
     import json
-    import time
     import re
     from bs4 import BeautifulSoup
     from langchain_text_splitters import RecursiveCharacterTextSplitter
     from opensearchpy import OpenSearch, RequestsHttpConnection, helpers
     from requests_aws4auth import AWS4Auth
 
-    # Setup AWS Authentication context for OpenSearch inside worker thread
     session = boto3.Session()
     credentials = session.get_credentials()
     awsauth = AWS4Auth(
@@ -43,7 +41,6 @@ def process_partition(records):
         'us-east-1', 'es', session_token=credentials.token
     )
 
-    # Instantiate isolated connection clients per cluster executor partition
     openSearchClient = OpenSearch(
         hosts=[{'host': OPENSEARCH_ENDPOINT, 'port': 443}],
         http_auth=awsauth,
@@ -56,7 +53,6 @@ def process_partition(records):
     )
     bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
 
-    # Data Processing Helper Closures
     def clean_sec_html(raw_sec_download):
         html_match = re.search(r'<html.*?>.*?</html>', raw_sec_download, re.DOTALL | re.IGNORECASE)
         if not html_match:
@@ -98,13 +94,10 @@ def process_partition(records):
         )
         return json.loads(response['body'].read())['embedding']
 
-    # Process files flowing through this specific partition cluster segment
     for row in records:
         file_path = row['path']
         binary_content = row['content']
         
-        # Parse ticker and year out of the S3 key layout dynamically
-        # Structure: s3://bucket-name/raw/<ticker>/<year>/...
         try:
             path_parts = file_path.split("/")
             raw_index = path_parts.index("raw")
@@ -113,9 +106,8 @@ def process_partition(records):
         except ValueError:
             ticker, year = "UNKNOWN", "UNKNOWN"
 
-        print(f"Worker processing whole document file: {file_path} [{ticker} - {year}]")
+        print(f"Worker processing file: {file_path} [{ticker} - {year}]")
         
-        # Convert binary data to string and execute extraction pipelines
         raw_html = binary_content.decode('utf-8', errors='ignore')
         clean_text = clean_sec_html(raw_html)
         final_chunks = chunk_text(clean_text)
@@ -138,72 +130,79 @@ def process_partition(records):
                     }
                 })
             except Exception as embed_err:
-                print(f"Failed to generate embedding for chunk {i} on {file_path}: {str(embed_err)}")
+                print(f"Failed to generate embedding for chunk {i}: {str(embed_err)}")
 
-        # Execute bulk payload indexing write directly from the worker to OpenSearch
         if bulk_actions:
             try:
-                success, errors = helpers.bulk(openSearchClient, bulk_actions)
-                print(f"Successfully indexed {success} chunks to OpenSearch for {ticker}-{year}.")
+                success, _ = helpers.bulk(openSearchClient, bulk_actions)
+                print(f"Successfully indexed {success} chunks for {ticker}-{year}.")
             except Exception as bulk_err:
-                print(f"Failed to commit bulk index execution to OpenSearch: {str(bulk_err)}")
+                print(f"Failed to commit bulk write to OpenSearch: {str(bulk_err)}")
 
-    yield f"Partition processing iteration completed."
+    yield "Partition processing iteration completed."
 
 
-# 3. Micro-Batch Orchestration Loop
-def process_micro_batch(batch_df, batch_id):
-    if batch_df.count() == 0:
-        return
+# =====================================================================
+# DRIVER NODE: CONTINUOUS ORCHESTRATION LOOP
+# =====================================================================
+sqs_client = boto3.client('sqs', region_name='us-east-1')
+
+print("Starting continuous SQS event listener daemon...")
+
+try:
+    while True:
+        s3_paths = []
+        receipt_handles = []
         
-    print(f"=== Triggering Micro-Batch: {batch_id} | Discovered New Files: {batch_df.count()} ===")
-    
-    # Ship data processing out across worker pool partitions using RDD mapPartitions transformation
-    processing_summary = batch_df.rdd.mapPartitions(process_partition).collect()
-    print(f"Micro-batch execution telemetry: {processing_summary}")
+        # Pull up to 50 messages per loop iteration to accumulate a mini-batch
+        for _ in range(5):
+            response = sqs_client.receive_message(
+                QueueUrl=QUEUE_URL,
+                MaxNumberOfMessages=10,
+                WaitTimeSeconds=5  # Long polling helps reduce API costs
+            )
+            
+            messages = response.get('Messages', [])
+            if not messages:
+                break
+                
+            for msg in messages:
+                try:
+                    body = json.loads(msg['Body'])
+                    records = body.get('Records', [])
+                    for record in records:
+                        bucket = record['s3']['bucket']['name']
+                        key = unquote_plus(record['s3']['object']['key'])
+                        s3_paths.append(f"s3://{bucket}/{key}")
+                    
+                    receipt_handles.append(msg['ReceiptHandle'])
+                except Exception as parse_err:
+                    print(f"Error parsing SQS payload: {str(parse_err)}")
 
+        # If no new documents are waiting, sleep and poll again
+        if not s3_paths:
+            print("No new documents detected in queue. Sleeping for 20 seconds...")
+            time.sleep(20)
+            continue
 
-# 4. Bind Streaming Context Monitor Source
+        print(f"Discovered {len(s3_paths)} files. Spinning up Spark workers to process...")
+        
+        try:
+            # Distribute the processing across the cluster infrastructure
+            df = spark.read.format("binaryFile").load(s3_paths)
+            processing_summary = df.rdd.mapPartitions(process_partition).collect()
+            print(f"Batch processing run completed: {processing_summary}")
+            
+            # Delete messages from queue ONLY after cluster processing succeeds
+            print("Clearing processed messages from SQS...")
+            for handle in receipt_handles:
+                sqs_client.delete_message(QueueUrl=QUEUE_URL, ReceiptHandle=handle)
+                
+        except Exception as spark_err:
+            print(f"CRITICAL: Spark processing batch failed: {str(spark_err)}")
+            print("Messages will remain in SQS queue for visibility retry reset.")
 
-# Explicit schema signature for the Spark 'binaryFile' format
-# This tells Spark exactly what the columns look like before any data arrives
-binary_file_schema = StructType([
-    StructField("path", StringType(), True),
-    StructField("modificationTime", TimestampType(), True),
-    StructField("length", LongType(), True),
-    StructField("content", BinaryType(), True)
-])
+except KeyboardInterrupt:
+    print("Termination signal received. Exiting daemon execution safely.")
 
-# Pointing directly to the /raw/ prefix. 
-file_stream_source = spark.readStream \
-    .format("binaryFile") \
-    .schema(binary_file_schema) \
-    .option("maxFilesPerTrigger", 1) \
-    .load(f"s3://{BUCKET_NAME}/raw/")
-
-
-# # Pointing directly to the /raw/ prefix. 'binaryFile' format recursively polls all sub-folders automatically.
-# file_stream_source = spark.readStream \
-#     .format("binaryFile") \
-#     .option("maxFilesPerTrigger", 1) \
-#     .load(f"s3://{BUCKET_NAME}/raw/")
-# TODO: increase maxFilesPerTrigger if Bedrock API can handle it***
-
-# Run continuous ingestion framework mapping execution states across engine checkpoints
-query = file_stream_source.writeStream \
-    .foreachBatch(process_micro_batch) \
-    .option("checkpointLocation", args['CHECKPOINT_DIR']) \
-    .start()
-
-time.sleep(10)
-
-# 3. Signal to your local machine that the stream is open for business
-ssm = boto3.client('ssm', region_name='us-east-1')
-ssm.put_parameter(
-    Name='/financial-datalake/sec-stream/status',
-    Value='READY',
-    Type='String',
-    Overwrite=True
-)
-
-query.awaitTermination()
+job.commit()
