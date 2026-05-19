@@ -3,14 +3,5 @@ constructs>=10.5.0,<11.0.0
 opensearch-py
 requests-aws4auth
 boto3
-
 pandas
 lxml
-
-# log more when going through fresh installation.
-# sec-edgar-downloader
-# boto3
-# json
-# logging
-# urllib3
-# argparse

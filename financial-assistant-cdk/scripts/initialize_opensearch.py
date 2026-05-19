@@ -26,17 +26,17 @@ def initialize_index(endpoint, index_name):
             "index": {
                 "knn": True, # enable KNN search
                 "knn.algo_param.ef_search": 100,
-                "refresh_interval": "30s"
+                "refresh_interval": "30s"   # slower refresh intervale to increase upload speed
             }
         },
         "mappings": {
             "properties": {
                 "embedding": {
                     "type": "knn_vector",
-                    "dimension": 1024,
+                    "dimension": 1024,      # size of output vector from AWS Titan embedding model
                     "method": {
-                        "name": "hnsw",
-                        "space_type": "innerproduct",
+                        "name": "hnsw",     # Hierarchical Navigable Small World alg - TODO: implement hierarchical chunking
+                        "space_type": "innerproduct",   # fast vector-space comparison alg
                         "engine": "faiss",
                         "parameters": {
                             "ef_construction": 128,

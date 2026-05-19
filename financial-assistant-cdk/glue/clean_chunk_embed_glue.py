@@ -8,12 +8,13 @@ from pyspark.context import SparkContext
 from awsglue.context import GlueContext
 from awsglue.job import Job
 
-# Extract runtime arguments
-args = getResolvedOptions(sys.argv, ['JOB_NAME', 'INGESTION_QUEUE_URL', 'OPENSEARCH_ENDPOINT'])
 
-INDEX_NAME = "aapl_financials"
+# Extract runtime arguments
+args = getResolvedOptions(sys.argv, ['JOB_NAME', 'PROCESSING_QUEUE_URL', 'OPENSEARCH_ENDPOINT'])
+
+INDEX_NAME = "financial_docs"
 OPENSEARCH_ENDPOINT = args['OPENSEARCH_ENDPOINT']
-QUEUE_URL = args['INGESTION_QUEUE_URL']
+QUEUE_URL = args['PROCESSING_QUEUE_URL']
 
 # Initialize contexts
 sc = SparkContext()
@@ -22,9 +23,8 @@ spark = glueContext.spark_session
 job = Job(glueContext)
 job.init(args['JOB_NAME'], args)
 
-# =====================================================================
-# WORKER NODE: PARALLEL PROCESSING LOGIC (Executed on cluster executors)
-# =====================================================================
+
+### WORKER NODE: PARALLEL PROCESSING LOGIC (Executed on cluster executors)
 def process_partition(records):
     import boto3
     import json
@@ -77,6 +77,7 @@ def process_partition(records):
                 element.decompose()
 
         clean_text = soup.get_text(separator="\n", strip=True)
+        
         return re.sub(r'\n+', '\n', clean_text)
 
     def chunk_text(text, max_chars=3000, overlap=300):
@@ -112,8 +113,8 @@ def process_partition(records):
         raw_html = binary_content.decode('utf-8', errors='ignore')
         clean_text = clean_sec_html(raw_html)
 
-        # DEBUG
-        print(clean_text)
+        # # DEBUG
+        # print(clean_text)
 
         final_chunks = chunk_text(clean_text)
         
@@ -147,9 +148,7 @@ def process_partition(records):
     yield "Partition processing iteration completed."
 
 
-# =====================================================================
-# DRIVER NODE: CONTINUOUS ORCHESTRATION LOOP
-# =====================================================================
+### DRIVER NODE: CONTINUOUS ORCHESTRATION LOOP
 sqs_client = boto3.client('sqs', region_name='us-east-1')
 
 print("Starting continuous SQS event listener daemon...")

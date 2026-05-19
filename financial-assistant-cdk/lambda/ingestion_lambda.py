@@ -51,9 +51,7 @@ def handler(event, context):
             raise e
         
         finally:
-            # CRITICAL SAFETY STEP:
-            # Wipe out the ticker folder to ensure consecutive invocations on this 
-            # recycled container start with an empty /tmp disk space layout.
+            # Clean up stored files (prevent running out of storage on recycled containers)
             ticker_path = f"/tmp/sec-edgar-filings/{ticker}"
             if os.path.exists(ticker_path):
                 shutil.rmtree(ticker_path)

@@ -41,7 +41,7 @@ function App() {
   return (
     <div className="flex flex-col h-screen max-w-3xl mx-auto p-4 bg-gray-50">
       <header className="py-4 border-b">
-        <h1 className="text-xl font-bold text-gray-800">Financial Assistant MVP</h1>
+        <h1 className="text-xl font-bold text-gray-800">Financial Assistant v2.0</h1>
       </header>
 
       {/* Chat History Field */}

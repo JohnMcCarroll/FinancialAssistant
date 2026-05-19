@@ -8,7 +8,7 @@ from requests_aws4auth import AWS4Auth
 
 # Define constants
 OpenSearchEndpoint = os.environ.get('OpenSearchEndpoint')
-INDEX_NAME = os.environ.get('COLLECTION_NAME', 'aapl_financials') # TODO: extend to multiple collections
+INDEX_NAME = os.environ.get('COLLECTION_NAME', 'financial_docs')
 
 # Setup logger
 logger = logging.getLogger()

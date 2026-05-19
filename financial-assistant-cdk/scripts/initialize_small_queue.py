@@ -33,7 +33,7 @@ def initialize_ingestion_sqs(queue_url):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--SQSURL", required=True)
+    parser.add_argument("--ignestion_sqs_url", required=True)
     args = parser.parse_args()
 
-    initialize_ingestion_sqs(args.SQSURL)
+    initialize_ingestion_sqs(args.ignestion_sqs_url)
