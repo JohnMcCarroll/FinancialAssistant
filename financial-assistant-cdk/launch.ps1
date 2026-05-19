@@ -10,10 +10,6 @@ $jobName = ($outputs | Where-Object { $_.OutputKey -eq "GlueJobName" }).OutputVa
 $bucketName = ($outputs | Where-Object { $_.OutputKey -eq "ExportDataLakeName" }).OutputValue
 $sqsurl = ($outputs | Where-Object { $_.OutputKey -eq "ExportSQSURL" }).OutputValue
 
-# Initialize AWS SQS for SEC data ingestion
-Write-Host "Collecting SEC Data" -ForegroundColor Yellow
-python ./scripts/initialize_queue.py --SQSURL $sqsurl
-
 # Initialize OpenSearch index (non-relational schema)
 Write-Host "Initializing OpenSearch Index and Vector Mapping..." -ForegroundColor Cyan
 python ./scripts/initialize_opensearch.py --endpoint $OpenSearchEndpoint --index "aapl_financials"
@@ -41,23 +37,27 @@ $runId = aws glue start-job-run --job-name $jobName --query "JobRunId" --output 
 Write-Host "Ingestion started. Run ID: $runId" -ForegroundColor Green
 Write-Host "You can monitor logs at: https://console.aws.amazon.com/glue/home#jobRun:jobName=$jobName;runId=$runId"
 
-Write-Host "Waiting for Stream Glue Setup to Complete" -ForegroundColor Yellow
+# Write-Host "Waiting for Stream Glue Setup to Complete" -ForegroundColor Yellow
 
-$attempts = 0
-while ($status_flag -eq "INITIALIZING") {
-    $status_flag = aws ssm get-parameter --name $ssmParameterName --query "Parameter.Value" --output text 2>$null
-    $glue_status = aws glue get-job-run --job-name $jobName --run-id $runId --query "JobRun.JobRunState" --output text
-    Write-Host "Current Status: $status_flag"
-    if ($status_flag -eq "READY") {
-        Write-Host "Glue stream is ready. Starting ingestion pipeline." -ForegroundColor Green
-    } elseif ($glue_status -eq "FAILED" -or $glue_status -eq "STOPPED") {
-        Write-Error "Glue Job failed. Check CloudWatch logs for $jobName"
-        exit 1
-    } else {
-        $attempts++
-        Start-Sleep -Seconds 10
-    }
-}
+# $attempts = 0
+# while ($status_flag -eq "INITIALIZING") {
+#     $status_flag = aws ssm get-parameter --name $ssmParameterName --query "Parameter.Value" --output text 2>$null
+#     $glue_status = aws glue get-job-run --job-name $jobName --run-id $runId --query "JobRun.JobRunState" --output text
+#     Write-Host "Current Status: $status_flag"
+#     if ($status_flag -eq "READY") {
+#         Write-Host "Glue stream is ready. Starting ingestion pipeline." -ForegroundColor Green
+#     } elseif ($glue_status -eq "FAILED" -or $glue_status -eq "STOPPED") {
+#         Write-Error "Glue Job failed. Check CloudWatch logs for $jobName"
+#         exit 1
+#     } else {
+#         $attempts++
+#         Start-Sleep -Seconds 10
+#     }
+# }
+
+# Initialize AWS SQS for SEC data ingestion
+Write-Host "Collecting SEC Data" -ForegroundColor Yellow
+python ./scripts/initialize_queue.py --SQSURL $sqsurl
 
 # Save Lambda function URL to file for front-end javascript retrieval
 Write-Host "Connecting to frontend" -ForegroundColor Yellow

@@ -205,7 +205,7 @@ class FinancialAssistantCdkStack(Stack):
             ),
             glue_version="4.0",
             worker_type="G.1X",
-            number_of_workers=2, # TODO: minimum (increase if bedrock API can handle it)
+            number_of_workers=6, # TODO: minimum = 2 (increase if bedrock API can handle it)
             default_arguments={
                 "--job-bookmark-option": "job-bookmark-disable",  # Streaming relies on Spark checkpoints instead
                 "--CHECKPOINT_DIR": f"s3://{self.bucket.bucket_name}/glue_checkpoints/sec_stream",

@@ -67,9 +67,10 @@ def process_partition(records):
                 element.decompose()
                 
         for hidden_div in soup.find_all(style=True):
-            style_string = hidden_div['style'].replace(" ", "").lower()
-            if "display:none" in style_string:
-                hidden_div.decompose()
+            if getattr(hidden_div, 'attrs', None) is not None:
+                style_string = hidden_div.attrs.get('style').replace(" ", "").lower()
+                if "display:none" in style_string:
+                    hidden_div.decompose()
                 
         for tag_name in ['script', 'style', 'noscript']:
             for element in soup.find_all(tag_name):
@@ -110,6 +111,10 @@ def process_partition(records):
         
         raw_html = binary_content.decode('utf-8', errors='ignore')
         clean_text = clean_sec_html(raw_html)
+
+        # DEBUG
+        print(clean_text)
+
         final_chunks = chunk_text(clean_text)
         
         bulk_actions = []

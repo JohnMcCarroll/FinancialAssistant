@@ -4,6 +4,9 @@ opensearch-py
 requests-aws4auth
 boto3
 
+pandas
+lxml
+
 # log more when going through fresh installation.
 # sec-edgar-downloader
 # boto3
