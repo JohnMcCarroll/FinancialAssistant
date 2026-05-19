@@ -12,6 +12,7 @@ from aws_cdk import (
     aws_sqs as sqs,
     aws_lambda_event_sources as sources,
     aws_s3_notifications as s3n,
+    Size,
 )
 from constructs import Construct
 
@@ -68,6 +69,7 @@ class FinancialAssistantCdkStack(Stack):
             code=_lambda.Code.from_asset("lambda"),
             timeout=Duration.minutes(10),
             memory_size=512,
+            ephemeral_storage_size=Size.mebibytes(2048), # Bumps disk to 2GB
             environment={
                 "BUCKET_NAME": self.bucket.bucket_name,
                 "QUEUE_URL": sec_queue.queue_url
@@ -80,7 +82,7 @@ class FinancialAssistantCdkStack(Stack):
             sources.SqsEventSource(
                 sec_queue,
                 batch_size=1, # Only process one ticker/year message at a time
-                max_concurrency=2,
+                max_concurrency=8,  # number of lambda functions requesting from SEC database (API rate limit = 10 calls/sec) TODO: increase
             )
         )
 
@@ -129,7 +131,7 @@ class FinancialAssistantCdkStack(Stack):
                 multi_az_with_standby_enabled=False
             ),
             ebs=opensearch.EbsOptions(
-                volume_size=10,
+                volume_size=100,        # TODO: scale with data needs OR switch to serverless
                 volume_type=ec2.EbsDeviceVolumeType.GP3
             ),
             # Security Settings

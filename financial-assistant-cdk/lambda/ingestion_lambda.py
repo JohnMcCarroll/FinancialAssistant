@@ -2,6 +2,8 @@ import boto3
 from sec_edgar_downloader import Downloader
 import os
 import json
+import shutil
+
 
 def handler(event, context):
     bucket_name = os.environ.get('BUCKET_NAME')
@@ -47,5 +49,14 @@ def handler(event, context):
             print(f"Error processing {ticker} for {year}: {str(e)}")
             # Raise the error so SQS knows the task failed and puts it back in the queue
             raise e
+        
+        finally:
+            # CRITICAL SAFETY STEP:
+            # Wipe out the ticker folder to ensure consecutive invocations on this 
+            # recycled container start with an empty /tmp disk space layout.
+            ticker_path = f"/tmp/sec-edgar-filings/{ticker}"
+            if os.path.exists(ticker_path):
+                shutil.rmtree(ticker_path)
+                print(f"Successfully cleaned up local storage for {ticker}")
 
     return {"statusCode": 200, "body": "Batch processed successfully"}
